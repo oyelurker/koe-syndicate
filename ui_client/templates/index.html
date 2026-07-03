@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Koe Syndicate - Command Center</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&family=Space+Mono:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
+    <link href="/static/css/koe.css" rel="stylesheet">
+</head>
+<body>
+    <div class="landing-container">
+        
+        <div class="command-sidebar glass-panel">
+            <div class="brand-header">
+                <h1 class="neon-text">Koe Syndicate</h1>
+                <div class="mono-text">Central Command Console</div>
+                <div class="status-badge" style="margin-top: 1rem;">
+                    <div class="pulse-dot"></div>
+                    SYSTEM_ONLINE
+                </div>
+            </div>
+
+            <form action="/start_lead_finding" method="post" class="search-form" id="init-form">
+                <div class="input-group">
+                    <label class="mono-text">Target City / Zone</label>
+                    <div class="input-wrapper">
+                        <i class="fas fa-crosshairs"></i>
+                        <input type="text" id="city" name="city" placeholder="e.g. San Francisco" required autocomplete="off">
+                    </div>
+                </div>
+
+                <div class="input-group">
+                    <label class="mono-text">Target Niche / Sector</label>
+                    <div class="input-wrapper">
+                        <i class="fas fa-filter"></i>
+                        <input type="text" id="niche" name="niche" placeholder="e.g. Specialty Auto Repair" autocomplete="off">
+                    </div>
+                </div>
+                
+                <button type="submit" class="btn-execute" id="execute-btn">
+                    <i class="fas fa-bolt"></i>
+                    Initialize Sequence
+                </button>
+            </form>
+        </div>
+
+        <div class="terminal-feed glass-panel">
+            <div class="terminal-header mono-text">
+                <div>// SYSTEM_LOG</div>
+                <div id="clock">00:00:00</div>
+            </div>
+            
+            <div class="terminal-window" id="log-window">
+                <div class="log-line">
+                    <span class="log-timestamp" id="init-time"></span>
+                    <span class="log-sys">[SYS]</span>
+                    <span>Koe Syndicate uplink established. Awaiting command parameters.</span>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        document.getElementById('init-time').textContent = new Date().toISOString().split('T')[1].split('.')[0];
+        
+        setInterval(() => {
+            document.getElementById('clock').textContent = new Date().toISOString().split('T')[1].split('.')[0];
+        }, 1000);
+
+        document.getElementById('init-form').addEventListener('submit', function(e) {
+            const btn = document.getElementById('execute-btn');
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> ENGAGING...';
+            btn.style.pointerEvents = 'none';
+            btn.style.opacity = '0.7';
+
+            const logWindow = document.getElementById('log-window');
+            const targetCity = document.getElementById('city').value;
+            const targetNiche = document.getElementById('niche').value || 'ALL_SECTORS';
+            
+            const timeStr = new Date().toISOString().split('T')[1].split('.')[0];
+            const html = `
+                <div class="log-line">
+                    <span class="log-timestamp">${timeStr}</span>
+                    <span class="log-sys" style="color:var(--neon-green)">[CMD]</span>
+                    <span>Executing target acquisition in ${targetCity} for [${targetNiche}]</span>
+                </div>
+            `;
+            logWindow.insertAdjacentHTML('beforeend', html);
+        });
+    </script>
+</body>
+</html>

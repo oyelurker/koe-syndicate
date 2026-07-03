@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Koe Syndicate - Central Command Console</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&family=Space+Mono:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
+    <link href="/static/css/koe.css" rel="stylesheet">
+    <style>
+        .dashboard-layout {
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+            background-color: var(--bg-color);
+        }
+
+        /* Sidebar stats */
+        .dashboard-sidebar {
+            width: 250px;
+            padding: 1.5rem;
+            border-right: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            gap: 2rem;
+            background: rgba(0, 0, 0, 0.4);
+        }
+
+        .stat-box {
+            background: rgba(0, 255, 136, 0.05);
+            border: 1px solid var(--border-color);
+            padding: 1.5rem;
+            border-radius: 8px;
+            text-align: center;
+        }
+
+        .stat-box .mono-text { margin-bottom: 0.5rem; }
+        .stat-box .stat-value { font-size: 2.5rem; font-weight: bold; color: var(--neon-green); }
+
+        /* Main panel */
+        .dashboard-main {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            padding: 2rem;
+            overflow: hidden;
+        }
+
+        .pipeline-container {
+            display: flex;
+            gap: 1.5rem;
+            height: 60vh;
+            margin-bottom: 2rem;
+        }
+
+        .pipeline-stage {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            background: var(--panel-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        .stage-header {
+            padding: 1rem;
+            border-bottom: 1px solid var(--border-color);
+            background: rgba(0, 0, 0, 0.3);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        
+        .stage-content {
+            flex: 1;
+            padding: 1rem;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+
+        /* Lead Cards */
+        .business-card {
+            background: rgba(0, 0, 0, 0.6);
+            border: 1px solid rgba(0, 255, 136, 0.2);
+            padding: 1rem;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: var(--transition);
+        }
+
+        .business-card:hover {
+            border-color: var(--neon-green);
+            box-shadow: 0 0 10px rgba(0, 255, 136, 0.1);
+        }
+
+        .business-card h4 {
+            margin: 0 0 0.5rem 0;
+            color: var(--text-main);
+            font-size: 0.95rem;
+        }
+
+        .contact-info {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            margin-bottom: 0.5rem;
+        }
+
+        .status-badge {
+            font-size: 0.7rem;
+            padding: 0.1rem 0.4rem;
+            background: rgba(0, 255, 136, 0.1);
+            color: var(--neon-green);
+            border: 1px solid var(--neon-green);
+            border-radius: 3px;
+        }
+
+        /* Modals (keeping standard IDs for JS) */
+        .modal-overlay {
+            position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.8);
+            display: flex; justify-content: center; align-items: center;
+            z-index: 100;
+        }
+        .modal-overlay.hidden { display: none; }
+        .modal-dialog {
+            background: #0F0F19; border: 1px solid var(--neon-green);
+            padding: 2rem; border-radius: 8px; width: 400px;
+        }
+        .modal-header h3 { color: var(--neon-green); margin: 0 0 1rem 0; }
+        .modal-close { float: right; background: none; border: none; color: white; cursor: pointer;}
+        
+        .sdr-btn {
+            background: transparent;
+            border: 1px solid var(--neon-green);
+            color: var(--neon-green);
+            padding: 0.5rem 1rem;
+            cursor: pointer;
+            width: 100%;
+            margin-top: 0.5rem;
+            font-family: var(--font-mono);
+            font-size: 0.8rem;
+        }
+        .sdr-btn:hover { background: rgba(0,255,136,0.1); }
+    </style>
+</head>
+<body>
+    <div class="dashboard-layout">
+        <div class="dashboard-sidebar">
+            <div class="brand-header" style="margin-bottom: 0;">
+                <h1 class="neon-text" style="font-size: 1.2rem;">Koe Syndicate</h1>
+                <div class="mono-text">Ops Console</div>
+            </div>
+
+            <div class="stat-box">
+                <div class="mono-text">Acquired Leads</div>
+                <div class="stat-value" id="total-businesses">{{ businesses|length }}</div>
+            </div>
+            
+            <div class="stat-box">
+                <div class="mono-text">Engaged</div>
+                <div class="stat-value" id="engaged-count">0</div>
+            </div>
+
+            <button onclick="resetDashboard()" class="btn-execute" style="margin-top: auto; padding: 0.5rem;">
+                <i class="fas fa-power-off"></i> RESET
+            </button>
+        </div>
+
+        <div class="dashboard-main">
+            <div class="terminal-header mono-text" style="margin-bottom: 1.5rem;">
+                <div>// ACTIVE OPERATION: {{ current_city | upper }}</div>
+                <div>STATUS: <span class="neon-text">{{ 'ACTIVE' if is_running else 'STANDBY' }}</span></div>
+            </div>
+
+            <div class="pipeline-container">
+                <!-- Data Mining (Lead Finder) -->
+                <div class="pipeline-stage">
+                    <div class="stage-header mono-text">
+                        <span>[1] DATA_MINING</span>
+                        <i class="fas fa-database neon-text"></i>
+                    </div>
+                    <div class="stage-content" id="lead-finder-content">
+                        {% for business in businesses %}
+                            {% if business.status == 'found' %}
+                            <div class="business-card" data-business-id="{{ business.id }}">
+                                <h4>{{ business.name }}</h4>
+                                <div class="contact-info">
+                                    {{ business.city }}<br>
+                                    {{ business.phone or 'No Phone' }}
+                                </div>
+                                <button class="sdr-btn" onclick="openSdrDialog('{{ business.id }}', '{{ business.name|escape }}', '{{ business.phone|escape }}', '{{ business.city|escape }}', event)">
+                                    INITIATE OUTREACH
+                                </button>
+                            </div>
+                            {% endif %}
+                        {% endfor %}
+                    </div>
+                </div>
+
+                <!-- Active Outreach (SDR) -->
+                <div class="pipeline-stage">
+                    <div class="stage-header mono-text">
+                        <span>[2] ACTIVE_OUTREACH</span>
+                        <i class="fas fa-satellite-dish neon-text"></i>
+                    </div>
+                    <div class="stage-content" id="sdr-content">
+                        {% for business in businesses %}
+                            {% if business.status in ['contacted', 'engaged', 'not_interested', 'no_response'] %}
+                            <div class="business-card" data-business-id="{{ business.id }}">
+                                <h4>{{ business.name }}</h4>
+                                <div class="status-badge">{{ business.status | upper }}</div>
+                            </div>
+                            {% endif %}
+                        {% endfor %}
+                    </div>
+                </div>
+
+                <!-- Conversion Ops (Lead Manager & Calendar) -->
+                <div class="pipeline-stage">
+                    <div class="stage-header mono-text">
+                        <span>[3] CONVERSION_OPS</span>
+                        <i class="fas fa-crosshairs neon-text"></i>
+                    </div>
+                    <div class="stage-content" id="lead-manager-content">
+                        <!-- Converting -->
+                        {% for business in businesses %}
+                            {% if business.status == 'converting' %}
+                            <div class="business-card" style="border-color: #00E5FF;">
+                                <h4>{{ business.name }}</h4>
+                                <div class="status-badge" style="color:#00E5FF; border-color:#00E5FF;">CONVERTING</div>
+                            </div>
+                            {% endif %}
+                        {% endfor %}
+                    </div>
+                    <div class="stage-content" id="meeting-scheduled-content" style="border-top: 1px solid var(--border-color);">
+                        <div class="mono-text" style="font-size: 0.7rem; color: var(--text-muted); margin-bottom: 0.5rem;">SECURED MEETINGS</div>
+                        {% for business in businesses %}
+                            {% if business.status == 'meeting_scheduled' %}
+                            <div class="business-card" style="border-color: #FF00FF;">
+                                <h4>{{ business.name }}</h4>
+                                <div class="status-badge" style="color:#FF00FF; border-color:#FF00FF;">MEETING SCHEDULED</div>
+                            </div>
+                            {% endif %}
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+
+            <!-- Terminal log at bottom -->
+            <div class="terminal-feed glass-panel" style="flex: 1; min-height: 200px;">
+                <div class="terminal-header mono-text">
+                    <div>// LIVE_TELEMETRY</div>
+                </div>
+                <div class="terminal-window" id="activity-log">
+                    {% for update in agent_updates %}
+                    <div class="log-line">
+                        <span class="log-timestamp">{{ update.timestamp|format_datetime }}</span>
+                        <span class="log-sys">[{{ update.agent_type|upper }}]</span>
+                        <span>{{ update.message }}</span>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modals -->
+    <div class="modal-overlay hidden" id="sdr-dialog-overlay" onclick="closeSdrDialog()">
+        <div class="modal-dialog" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <h3>AUTHORIZE OUTREACH</h3>
+                <button class="modal-close" onclick="closeSdrDialog()"><i class="fas fa-times"></i></button>
+            </div>
+            <div class="modal-content" style="margin-bottom: 1.5rem;">
+                <div id="business-preview" class="mono-text" style="color:var(--text-muted); margin-bottom:1rem;"></div>
+                <div class="input-group">
+                    <label class="mono-text">Target Ph. Number (Override)</label>
+                    <input type="tel" id="sdr-phone-input" style="width: 100%; background: #05050A; border: 1px solid var(--border-color); color: var(--text-main); padding: 0.5rem;" required>
+                </div>
+            </div>
+            <button class="btn-execute" id="confirm-sdr-btn" onclick="confirmSendToSdr()" disabled>
+                INITIATE CONTACT
+            </button>
+        </div>
+    </div>
+
+    <!-- Keep Human Input Dialog for backend compatibility -->
+    <div class="modal-overlay hidden" id="human-input-dialog-overlay" onclick="closeHumanInputDialog()">
+        <div class="modal-dialog human-input-dialog" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <h3>MANUAL OVERRIDE REQUIRED</h3>
+                <button class="modal-close" onclick="closeHumanInputDialog()"><i class="fas fa-times"></i></button>
+            </div>
+            <div class="modal-content">
+                <textarea id="human-input-prompt" readonly style="width:100%; height:100px; background:#000; color:#00ff88; border:1px solid #00ff88;"></textarea>
+                <input type="url" id="website-url-input" placeholder="Enter URL..." style="width:100%; margin-top:1rem; padding:0.5rem;">
+            </div>
+            <button class="btn-execute" id="submit-website-url-btn" onclick="submitWebsiteUrl()" style="margin-top:1rem;">
+                SUBMIT
+            </button>
+        </div>
+    </div>
+
+    <script src="/static/js/dashboard.js"></script>
+</body>
+</html>
