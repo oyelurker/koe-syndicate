@@ -198,6 +198,32 @@ class SDRAgentExecutor(AgentExecutor):
             logger.info(f"Task {context.task_id}: Calling ADK run_async for business: {business_name}")
             final_result = {"status": "completed", "business_name": business_name, "sdr_result": {}}
             
+            import os
+            import asyncio
+            if os.environ.get("MOCK_SDR", "").lower() == "true":
+                logger.info(f"Task {context.task_id}: Using MOCK SDR Mode to save API credits")
+                await asyncio.sleep(1)
+                task_updater.update_status(TaskState.working, message=task_updater.new_agent_message(parts=[Part(root=DataPart(data={"text": f"MOCK: Analyzing digital footprint for {business_name}..."}))]))
+                await asyncio.sleep(1)
+                
+                # Mock a phone call tool invocation
+                mock_phone = business_data.get("phone") or "+1-555-0199"
+                task_updater.update_status(TaskState.working, message=task_updater.new_agent_message(parts=[Part(root=DataPart(data={"tool_call": "phone_call", "args": {"number_to_call": mock_phone, "business_context": "Mocking to save credits"}}))]))
+                
+                await asyncio.sleep(1)
+                
+                final_result["sdr_result"] = {
+                    "call_summary": "Mock phone call completed successfully. The lead expressed strong interest.",
+                    "call_disposition": "meeting_booked"
+                }
+                
+                task_updater.complete(
+                    message=task_updater.new_agent_message(
+                        parts=[Part(root=DataPart(data={"result": final_result}))]
+                    )
+                )
+                return
+            
             # Collect all results from the agent pipeline
             all_events = []
             phone_call_result = None

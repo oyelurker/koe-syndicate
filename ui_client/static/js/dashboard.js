@@ -237,10 +237,9 @@ class DashboardManager {
     }
     
     addBusinessCard(business, agent) {
-        const column = this.getColumnForStatus(business.status);
-        if (!column) return;
+        const content = this.getColumnForStatus(business.status);
+        if (!content) return;
         
-        const content = column.querySelector('.column-content');
         const card = this.createBusinessCard(business);
         
         // Add with animation
@@ -272,10 +271,8 @@ class DashboardManager {
             return;
         }
         
-        const newColumn = this.getColumnForStatus(newStatus);
-        if (!newColumn) return;
-        
-        const newContent = newColumn.querySelector('.column-content');
+        const newContent = this.getColumnForStatus(newStatus);
+        if (!newContent) return;
         
         // Remove from old location
         existingCard.remove();
@@ -381,20 +378,20 @@ class DashboardManager {
     }
     
     getColumnForStatus(status) {
-        const statusToAgent = {
-            'found': 'lead_finder',
-            'contacted': 'sdr',
-            'engaged': 'sdr',
-            'not_interested': 'sdr',
-            'no_response': 'sdr',
-            'converting': 'lead_manager',
-        'meeting_scheduled': 'calendar'
+        const statusToContainer = {
+            'found': 'lead-finder-content',
+            'contacted': 'sdr-content',
+            'engaged': 'sdr-content',
+            'not_interested': 'sdr-content',
+            'no_response': 'sdr-content',
+            'converting': 'lead-manager-content',
+            'meeting_scheduled': 'meeting-scheduled-content'
         };
         
-        const agentType = statusToAgent[status];
-        if (!agentType) return null;
+        const containerId = statusToContainer[status];
+        if (!containerId) return null;
         
-        return document.querySelector(`[data-agent="${agentType}"]`);
+        return document.getElementById(containerId);
     }
     
     getAgentForStatus(status) {
@@ -450,6 +447,7 @@ class DashboardManager {
     }
     
     animateCounter(element, targetValue) {
+        if (!element) return;
         const currentValue = parseInt(element.textContent) || 0;
         if (currentValue === targetValue) return;
         
@@ -508,7 +506,7 @@ class DashboardManager {
     }
     
     clearAllBusinessCards() {
-        const contents = document.querySelectorAll('.column-content');
+        const contents = document.querySelectorAll('.stage-content');
         contents.forEach(content => {
             content.innerHTML = '';
         });
@@ -720,21 +718,11 @@ class DashboardManager {
         phoneInput.removeEventListener('blur', this.handlePhoneBlur);
         
         // Add phone number masking
-        this.    handlePhoneInput = (e) => {
-            let value = e.target.value.replace(/\D/g, ''); // Remove all non-digits
-            let formattedValue = '';
-            
-            if (value.length > 0) {
-                if (value.length <= 3) {
-                    formattedValue = `(${value}`;
-                } else if (value.length <= 6) {
-                    formattedValue = `(${value.slice(0, 3)}) ${value.slice(3)}`;
-                } else {
-                    formattedValue = `(${value.slice(0, 3)}) ${value.slice(3, 6)}-${value.slice(6, 10)}`;
-                }
-            }
-            
-            e.target.value = formattedValue;
+        // Add phone number validation
+        this.handlePhoneInput = (e) => {
+            // Allow digits, spaces, hyphens, and a leading plus
+            let value = e.target.value.replace(/[^\d\s\-\+]/g, '');
+            e.target.value = value;
             
             // Update button state immediately
             this.updateSendButtonState();
@@ -743,8 +731,8 @@ class DashboardManager {
         // Add validation on blur
         this.handlePhoneBlur = (e) => {
             const value = e.target.value.replace(/\D/g, '');
-            if (value.length !== 10) {
-                e.target.setCustomValidity('Please enter a valid 10-digit US phone number');
+            if (value.length < 10) {
+                e.target.setCustomValidity('Please enter a valid phone number (at least 10 digits)');
             } else {
                 e.target.setCustomValidity('');
             }
@@ -764,8 +752,8 @@ class DashboardManager {
         if (!phoneInput || !sendButton) return;
         
         const phoneValue = phoneInput.value.replace(/\D/g, '');
-        // Simplified validation - just check if we have 10 digits (US phone number)
-        const isValid = phoneValue.length === 10;
+        // Simplified validation - just check if we have at least 10 digits
+        const isValid = phoneValue.length >= 10;
         
         sendButton.disabled = !isValid;
         
@@ -791,7 +779,7 @@ class DashboardManager {
                 phoneInput.classList.remove('valid-input');
                 
                 if (validationStatus) {
-                    validationStatus.textContent = 'US format required (10 digits)';
+                    validationStatus.textContent = 'Phone format required (at least 10 digits)';
                     validationStatus.className = 'validation-status invalid';
                 }
                 
@@ -831,11 +819,12 @@ class DashboardManager {
             return;
         }
         
-        const phoneValue = phoneInput.value.replace(/\D/g, '');
+        const phoneValue = phoneInput.value.replace(/[^\d+]/g, '');
         
         // Final validation (should not be needed due to real-time validation)
-        if (phoneValue.length !== 10) {
-            this.showErrorToast('Please enter a valid 10-digit US phone number');
+        const digitsOnly = phoneValue.replace(/\D/g, '');
+        if (digitsOnly.length < 10) {
+            this.showErrorToast('Please enter a valid phone number (at least 10 digits)');
             return;
         }
         
@@ -1020,6 +1009,20 @@ function confirmSendToSdr() {
     }
 }
 
+function openSdrDialog(id, name, phone, city, event) {
+    if (event) {
+        event.stopPropagation();
+    }
+    if (dashboardManagerInstance) {
+        dashboardManagerInstance.showSdrDialog({
+            id: id,
+            name: name,
+            phone: phone,
+            city: city
+        });
+    }
+}
+
 function toggleLog() {
     const logElement = document.querySelector('.activity-log');
     const toggleButton = document.querySelector('.toggle-log i');
@@ -1033,11 +1036,23 @@ function toggleLog() {
     }
 }
 
-// Initialize dashboard when DOM is loaded
-document.addEventListener('DOMContentLoaded', function() {
+// Initialize dashboard
+function initDashboard() {
     console.log('Initializing dashboard...');
-    dashboardManagerInstance = new DashboardManager();
-});
+    try {
+        dashboardManagerInstance = new DashboardManager();
+        console.log('Dashboard initialized successfully!');
+    } catch (e) {
+        console.error('Failed to initialize dashboard:', e);
+    }
+}
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initDashboard);
+} else {
+    // DOM already loaded
+    initDashboard();
+}
 
 // Handle page visibility changes to manage WebSocket connection
 document.addEventListener('visibilitychange', function() {

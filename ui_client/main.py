@@ -17,6 +17,9 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 from datetime import datetime
 from enum import Enum
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # Common project imports
 import common.config as config
@@ -441,6 +444,37 @@ async def call_lead_finder_agent(city: str, session_id: str, **kwargs) -> dict[s
     """
     Calls the Lead Finder agent - uses A2A if available, otherwise falls back to simple HTTP.
     """
+    import os, uuid, asyncio
+    if os.environ.get("MOCK_LEAD_FINDER", "").lower() == "true":
+        logging.getLogger("UI_CLIENT").info(f"Using MOCK leads for {city} to save API credits.")
+        await asyncio.sleep(2)  # Simulate agent thinking time
+        return {
+            "success": True,
+            "businesses": [
+                {
+                    "id": str(uuid.uuid4()),
+                    "name": f"Demo Lead Alpha - {city}",
+                    "phone": "+1-555-0101",
+                    "email": "contact@demoleadalpha.com",
+                    "description": "A promising mock lead for testing purposes without using API credits.",
+                    "city": city,
+                    "status": "found",
+                    "notes": ["Generated via Mock Mode"]
+                },
+                {
+                    "id": str(uuid.uuid4()),
+                    "name": f"Demo Lead Beta - {city}",
+                    "phone": "+1-555-0102",
+                    "email": "hello@demoleadbeta.com",
+                    "description": "Another mock lead generated to save Gemini credits during testing.",
+                    "city": city,
+                    "status": "found",
+                    "notes": ["Generated via Mock Mode"]
+                }
+            ],
+            "error": None
+        }
+
     if A2A_AVAILABLE:
         return await call_lead_finder_agent_a2a(city, session_id, **kwargs)
     else:
@@ -465,7 +499,7 @@ async def call_sdr_agent_a2a(business_data: dict[str, Any], session_id: str) -> 
     }
     
     try:
-        async with httpx.AsyncClient() as http_client:
+        async with httpx.AsyncClient(timeout=300.0) as http_client:
             a2a_client = A2AClient(httpx_client=http_client, url=sdr_url)
             
             # Prepare A2A message
@@ -771,6 +805,38 @@ async def run_lead_finding_process(city: str, session_id: str, niche: str = ""):
         if result["success"]:
             found_businesses = result.get("businesses", [])
             business_logger.info(f"Lead Finder returned {len(found_businesses)} businesses")
+            
+            # Store businesses in UI state and notify the dashboard
+            for b_data in found_businesses:
+                try:
+                    biz_id = b_data.get("id", str(uuid.uuid4()))
+                    new_biz = Business(
+                        id=biz_id,
+                        name=b_data.get("name") or "Unknown Business",
+                        city=city,
+                        phone=b_data.get("phone") or b_data.get("phone_number"),
+                        email=b_data.get("email"),
+                        description=b_data.get("description") or b_data.get("snippet"),
+                        status=BusinessStatus.FOUND,
+                        notes=["Found via Lead Finder"]
+                    )
+                    app_state["businesses"][biz_id] = new_biz
+                    
+                    # Push to UI immediately
+                    await manager.send_update({
+                        "type": "business_updated",
+                        "agent": AgentType.LEAD_FINDER.value,
+                        "business": new_biz.model_dump(),
+                        "update": {
+                            "agent_type": AgentType.LEAD_FINDER.value,
+                            "business_id": biz_id,
+                            "status": BusinessStatus.FOUND.value,
+                            "message": "Lead discovered in initial search"
+                        },
+                        "timestamp": datetime.now().isoformat(),
+                    })
+                except Exception as e:
+                    business_logger.error(f"Error processing business lead: {e}")
 
             # Send completion update regardless of whether businesses were found
             await manager.send_update({
@@ -823,10 +889,10 @@ async def websocket_endpoint(websocket: WebSocket):
         # Send current state to newly connected client
         await websocket.send_text(json.dumps({
             "type": "initial_state",
-            "businesses": [business.dict() for business in app_state["businesses"].values()],
+            "businesses": [business.model_dump() for business in app_state["businesses"].values()],
             "current_city": app_state["current_city"],
             "is_running": app_state["is_running"],
-        }))
+        }, default=str))
         
         # Keep connection alive
         while True:
@@ -1354,5 +1420,5 @@ if __name__ == "__main__":
         "ui_client.main:app",
         host="0.0.0.0",
         port=config.UI_CLIENT_SERVICE_NAME,
-        reload=True
+        reload=False
     )
