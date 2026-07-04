@@ -42,10 +42,6 @@ async def sdr_bigquery_upload(
     dataset_id = "sdr_data"
     table_id = "sdr_results"
 
-    if not project:
-        logger.error("sdr_bigquery_upload: GOOGLE_CLOUD_PROJECT not configured")
-        return {"status": "error", "message": "GOOGLE_CLOUD_PROJECT not configured"}
-
     # --- Prepare the record ---
     sdr_record = {
         "sdr_run_id": str(uuid.uuid4()),
@@ -66,6 +62,10 @@ async def sdr_bigquery_upload(
         await asyncio.to_thread(_write_json_file, filepath, sdr_record)
     except Exception as e:
         logger.error(f"Failed to write local backup file: {e}")
+
+    if not project:
+        logger.warning("sdr_bigquery_upload: GOOGLE_CLOUD_PROJECT not configured. Used local JSON fallback.")
+        return {"status": "success", "message": "GOOGLE_CLOUD_PROJECT not configured. Saved to local JSON.", "backup_file": str(filepath)}
 
     # --- Upload to BigQuery ---
     try:
@@ -167,8 +167,29 @@ async def bigquery_email_engagement_upload(
     project = os.getenv("GOOGLE_CLOUD_PROJECT")
     dataset_id = "sdr_data"
 
+    # Prepare data
+    now = datetime.utcnow()
+    row_to_insert = {
+        "event_id": str(uuid.uuid4()),
+        "recipient_email": recipient_email,
+        "subject": subject,
+        "status": status,
+        "campaign_id": campaign_id,
+        "notes": notes,
+        "timestamp": now.isoformat(),
+    }
+    
+    # Save local backup
+    timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filepath = Path(f"email_engagement_upload_{timestamp_str}.json")
+    try:
+        await asyncio.to_thread(_write_json_file, filepath, row_to_insert)
+    except Exception as e:
+        logger.error(f"Failed to write local backup file: {e}")
+
     if not project:
-        return {"status": "error", "message": "GOOGLE_CLOUD_PROJECT not configured"}
+        logger.warning("bigquery_email_engagement_upload: GOOGLE_CLOUD_PROJECT not configured. Used local JSON fallback.")
+        return {"status": "success", "message": "Saved to local JSON.", "backup_file": str(filepath)}
 
     try:
         client = bigquery.Client(project=project)
@@ -195,18 +216,6 @@ async def bigquery_email_engagement_upload(
             )
             table = client.create_table(table) # Re-assign the returned table object
             logger.info(f"Created BigQuery table: {ENGAGEMENT_TABLE_ID}")
-
-        # Prepare data for insertion
-        now = datetime.utcnow()
-        row_to_insert = {
-            "event_id": str(uuid.uuid4()),
-            "recipient_email": recipient_email,
-            "subject": subject,
-            "status": status,
-            "campaign_id": campaign_id,
-            "notes": notes,
-            "timestamp": now.isoformat(),
-        }
 
         errors = client.insert_rows_json(table, [row_to_insert])
         if errors:
@@ -239,8 +248,28 @@ async def bigquery_accepted_offer_upload(
     project = os.getenv("GOOGLE_CLOUD_PROJECT")
     dataset_id = "sdr_data"
 
+    now = datetime.utcnow()
+    row_to_insert = {
+        "acceptance_id": str(uuid.uuid4()),
+        "business_name": business_name,
+        "business_id": business_id,
+        "contact_email": contact_email,
+        "offer_details": offer_details,
+        "notes": notes,
+        "timestamp": now.isoformat(),
+    }
+    
+    # Save local backup
+    timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filepath = Path(f"accepted_offer_upload_{timestamp_str}.json")
+    try:
+        await asyncio.to_thread(_write_json_file, filepath, row_to_insert)
+    except Exception as e:
+        logger.error(f"Failed to write local backup file: {e}")
+
     if not project:
-        return {"status": "error", "message": "GOOGLE_CLOUD_PROJECT not configured"}
+        logger.warning("bigquery_accepted_offer_upload: GOOGLE_CLOUD_PROJECT not configured. Used local JSON fallback.")
+        return {"status": "success", "message": "Saved to local JSON.", "backup_file": str(filepath)}
 
     try:
         client = bigquery.Client(project=project)
@@ -266,17 +295,6 @@ async def bigquery_accepted_offer_upload(
             )
             table = client.create_table(table) # Re-assign the returned table object
             logger.info(f"Created BigQuery table: {ACCEPTED_OFFERS_TABLE_ID}")
-
-        now = datetime.utcnow()
-        row_to_insert = {
-            "acceptance_id": str(uuid.uuid4()),
-            "business_name": business_name,
-            "business_id": business_id,
-            "contact_email": contact_email,
-            "offer_details": offer_details,
-            "notes": notes,
-            "timestamp": now.isoformat(),
-        }
 
         errors = client.insert_rows_json(table, [row_to_insert])
         if errors:
