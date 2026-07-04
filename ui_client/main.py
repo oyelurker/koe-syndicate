@@ -1209,6 +1209,47 @@ async def trigger_lead_manager():
             session_id = str(uuid.uuid4())
             app_state["session_id"] = session_id
         
+        # Check for Mock Mode
+        if os.environ.get("MOCK_SDR", "").lower() == "true":
+            # Send initial update
+            await manager.send_update({
+                "type": "agent_status",
+                "agent": "lead_manager",
+                "status": "active",
+                "message": "Lead Manager mock agent triggered manually",
+                "timestamp": datetime.now().isoformat(),
+            })
+            
+            # Simulate processing delay
+            import asyncio
+            await asyncio.sleep(1.5)
+            
+            # Simulate incoming email
+            await manager.send_update({
+                "type": "agent_status",
+                "agent": "lead_manager",
+                "status": "working",
+                "message": "📥 Received email reply from Demo Lead Alpha: 'Yes, we are interested in your services. Can we hop on a call this Thursday at 2 PM to discuss?'",
+                "timestamp": datetime.now().isoformat(),
+            })
+            
+            await asyncio.sleep(2)
+            
+            # Simulate CRM action
+            await manager.send_update({
+                "type": "agent_status",
+                "agent": "lead_manager",
+                "status": "idle",
+                "message": "✅ Lead recorded in CRM. Follow-up meeting scheduled for Thursday at 2 PM.",
+                "timestamp": datetime.now().isoformat(),
+            })
+            
+            return JSONResponse(
+                status_code=200,
+                content={"status": "success", "message": "Mock email processed"}
+            )
+        
+        # Real Mode Execution
         # Send initial update
         await manager.send_update({
             "type": "agent_status",
