@@ -164,9 +164,14 @@
                 <div class="stat-value" id="engaged-count">0</div>
             </div>
 
-            <button onclick="resetDashboard()" class="btn-execute" style="margin-top: auto; padding: 0.5rem;">
-                <i class="fas fa-power-off"></i> RESET
-            </button>
+            <div style="margin-top: auto; display: flex; flex-direction: column; gap: 0.5rem;">
+                <button onclick="triggerLeadManager()" class="btn-execute" style="padding: 0.5rem; background: rgba(0, 229, 255, 0.1); border-color: #00E5FF; color: #00E5FF;" title="Trigger a mock email reply from a prospect">
+                    <i class="fas fa-envelope"></i> TRIGGER LEAD MANAGER
+                </button>
+                <button onclick="resetDashboard()" class="btn-execute" style="padding: 0.5rem;">
+                    <i class="fas fa-power-off"></i> RESET
+                </button>
+            </div>
         </div>
 
         <div class="dashboard-main">
