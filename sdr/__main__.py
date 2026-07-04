@@ -196,7 +196,7 @@ def main(host: str, port: int):
     In production (Docker/Cloud Run), Uvicorn is called directly.
     """
     logger.info(f"Starting development server on http://{host}:{port}/")
-    uvicorn.run("sdr.__main__:app", host=host, port=port, reload=True)
+    uvicorn.run("sdr.__main__:app", host=host, port=port, reload=False)
 
 if __name__ == "__main__":
     main()
