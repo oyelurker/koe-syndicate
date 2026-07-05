@@ -217,6 +217,20 @@ class SDRAgentExecutor(AgentExecutor):
                     "call_disposition": "meeting_booked"
                 }
                 
+                try:
+                    from .sdr.callbacks import send_sdr_update_to_ui
+                    send_sdr_update_to_ui(business_data, {
+                        "status": "success",
+                        "message": "Mock phone call completed successfully",
+                        "crafted_email": {
+                            "to": business_data.get("email") or "mock@example.com",
+                            "subject": "Follow up from our call",
+                            "body": "Hi, it was great speaking with you..."
+                        }
+                    })
+                except Exception as e:
+                    logger.error(f"Task {context.task_id}: Error sending mock SDR update to UI: {e}")
+                
                 task_updater.complete(
                     message=task_updater.new_agent_message(
                         parts=[Part(root=DataPart(data={"result": final_result}))]

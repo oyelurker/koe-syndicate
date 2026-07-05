@@ -26,3 +26,6 @@ Thumbs.db
 # Secrets / keys
 *.json
 !config.template
+
+#Local Testing
+test refrences can be picked/
