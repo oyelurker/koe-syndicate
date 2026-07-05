@@ -40,6 +40,21 @@ async def check_hot_lead(email_address: str) -> bool:
     try:
         logger.info(f"🔍 Checking if {email_address} is a hot lead...")
         
+        import os
+        if os.environ.get("MOCK_LEAD_FINDER", "").lower() == "true":
+            logger.info("Using MOCK mode for BigQuery hot lead check")
+            return {
+                "success": True,
+                "is_hot_lead": True,
+                "email": email_address,
+                "lead_data": {
+                    "email": email_address,
+                    "name": "Mock Business",
+                    "id": "mock-uuid"
+                },
+                "message": f"{email_address} found in hot leads database (MOCK)"
+            }
+            
         # Initialize BigQuery client
         client = bigquery.Client(project=PROJECT)
         
