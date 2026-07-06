@@ -1,0 +1,5 @@
+steps:
+- name: 'gcr.io/cloud-builders/docker'
+  args: ['build', '-t', 'us-central1-docker.pkg.dev/apac-cohort2-track3/koe-syndicate/lead-finder:latest', '-f', 'Dockerfile.lead_finder', '.']
+images:
+- 'us-central1-docker.pkg.dev/apac-cohort2-track3/koe-syndicate/lead-finder:latest'

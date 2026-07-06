@@ -6,7 +6,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     python3-dev \
     gfortran \
-    libatlas-base-dev \
     libopenblas-dev \
     pkg-config \
   && rm -rf /var/lib/apt/lists/*
