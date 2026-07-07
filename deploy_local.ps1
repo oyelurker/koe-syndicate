@@ -1,4 +1,4 @@
-﻿# ============================================================
+# ============================================================
 # Koe Syndicate -- Local Deploy Script (PowerShell / Windows)
 # Equivalent of deploy_local.sh for Windows environments.
 
@@ -38,7 +38,7 @@ if (Test-Path $envFile) {
     }
     Write-Ok ".env loaded"
 } else {
-    Write-Fail ".env not found. Copy config.template to .env and fill in your API keys."
+    Write-Fail ".env not found. Copy .env.example to .env and fill in your API keys."
     exit 1
 }
 

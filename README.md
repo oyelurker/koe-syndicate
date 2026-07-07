@@ -5,6 +5,10 @@
 ![Gemini](https://img.shields.io/badge/Powered_by-Gemini_2.0_Flash-orange?style=for-the-badge&logo=google)
 ![NVIDIA](https://img.shields.io/badge/Accelerated_by-NVIDIA_GPUs-76B900?style=for-the-badge&logo=nvidia)
 
+<video src="./UpdatedVideo_Submission_The%20Syndicates.mp4" controls="controls" playsinline muted="muted" width="100%">
+  Your browser does not support the video tag.
+</video>
+
 **KOE Syndicate** is a practical Decision-Intelligence and Autonomous Multi-Agent platform designed to solve a massive bottleneck in **Local Economic Development and B2B Enterprise Operations**. 
 
 It transforms raw, unstructured local community data into actionable intelligence, visualizes it on a live Ops Console, and uses a team of autonomous AI agents to execute workflows and outreach.
@@ -72,9 +76,9 @@ Instead of one massive, confusing AI prompt, we engineered a collaborative netwo
    ```
 
 2. **Environment Variables:**
-   Copy the `config.template` file to `.env` and fill in your API credentials.
+   Copy the `.env.example` file to `.env` and fill in your API credentials.
    ```bash
-   cp config.template .env
+   cp .env.example .env
    ```
 
 3. **Run the Microservices:**
