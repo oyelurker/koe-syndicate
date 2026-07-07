@@ -5,7 +5,7 @@
 ![Gemini](https://img.shields.io/badge/Powered_by-Gemini_2.0_Flash-orange?style=for-the-badge&logo=google)
 ![NVIDIA](https://img.shields.io/badge/Accelerated_by-NVIDIA_GPUs-76B900?style=for-the-badge&logo=nvidia)
 
-<video src="./UpdatedVideo_Submission_The%20Syndicates.mp4" controls="controls" playsinline muted="muted" width="100%">
+<video src="UpdatedVideo_Submission_The_Syndicates.mp4" controls="controls" playsinline muted="unmuted" width="100%">
   Your browser does not support the video tag.
 </video>
 
