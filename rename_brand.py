@@ -15,14 +15,15 @@ def replace_in_file(filepath):
 
     # Standard replacements
     content = content.replace("Koe Syndicate", "Koe Syndicate")
-    content = content.replace("koe_syndicate", "koe_syndicate")
+    content = content.replace("koe-syndicate", "koe-syndicate")
     content = content.replace("Koe Syndicate", "Koe Syndicate")
-    content = content.replace("koesyndicate", "koesyndicate")
+    content = content.replace("koe_syndicate", "koe_syndicate")
+    content = content.replace("KOE_SYNDICATE", "KOE_SYNDICATE")
 
     # deploy_local.sh / deploy_local.ps1 startup banner replacement
     # Using regex to find the banners
-    content = re.sub(r'KOE SYNDICATE: SYSTEM ONLINE', 'KOE SYNDICATE: SYSTEM ONLINE', content)
-    content = re.sub(r'Koe Syndicate -- Local Deploy Script', 'Koe Syndicate -- Local Deploy Script', content)
+    content = re.sub(r'KOE_SYNDICATE: SYSTEM ONLINE', 'KOE SYNDICATE: SYSTEM ONLINE', content, flags=re.IGNORECASE)
+    content = re.sub(r'Koe Syndicate -- Local Deploy Script', 'Koe Syndicate -- Local Deploy Script', content, flags=re.IGNORECASE)
 
     if content != original_content:
         with open(filepath, 'w', encoding='utf-8') as f:

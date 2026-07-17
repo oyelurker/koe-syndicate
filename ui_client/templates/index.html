@@ -3,92 +3,121 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Koe Syndicate - Command Center</title>
+    <title>KOE Syndicate - Automated Lead Generation Agency</title>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&family=Space+Mono:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
-    <link href="/static/css/koe.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link href="/static/css/landing.css" rel="stylesheet">
 </head>
 <body>
-    <div class="landing-container">
-        
-        <div class="command-sidebar glass-panel">
-            <div class="brand-header">
-                <h1 class="neon-text">Koe Syndicate</h1>
-                <div class="mono-text">Central Command Console</div>
-                <div class="status-badge" style="margin-top: 1rem;">
-                    <div class="pulse-dot"></div>
-                    SYSTEM_ONLINE
-                </div>
+    <nav class="navbar">
+        <div class="logo">
+            <i class="fas fa-bolt"></i> <span>KOE Syndicate</span>
+        </div>
+        <div class="nav-links">
+            <a href="#how-it-works">How it works</a>
+            <a href="#services">Services</a>
+            <a href="#results">Results</a>
+            <a href="/?force_dashboard=true" class="btn-primary">My Dashboard</a>
+        </div>
+    </nav>
+
+    <main>
+        <section class="hero">
+            <div class="hero-pill">
+                <i class="fas fa-star" style="color: #f59e0b; margin-right: 0.5rem;"></i> Top B2B Lead Gen Agency
             </div>
-
-            <form action="/start_lead_finding" method="post" class="search-form" id="init-form">
+            <h1>More Meetings. Less Hassle.<br><span class="highlight">Zero Prospecting Work.</span></h1>
+            <p>We build and run your entire outbound engine—finding leads, calling prospects, and booking meetings—so you can focus on the work you love. Built for agencies, B2B services, and high-ticket consultants.</p>
+            
+            <form action="/start_lead_finding" method="post" class="demo-form floating-element">
+                <div style="margin-bottom: 1rem; text-align: center; font-weight: 600;">Test the System Now</div>
                 <div class="input-group">
-                    <label class="mono-text">Target City / Zone</label>
-                    <div class="input-wrapper">
-                        <i class="fas fa-crosshairs"></i>
-                        <input type="text" id="city" name="city" placeholder="e.g. San Francisco" required autocomplete="off">
-                    </div>
+                    <label>Target City / Zone</label>
+                    <input type="text" id="city" name="city" placeholder="e.g. San Francisco" required>
                 </div>
-
                 <div class="input-group">
-                    <label class="mono-text">Target Niche / Sector</label>
-                    <div class="input-wrapper">
-                        <i class="fas fa-filter"></i>
-                        <input type="text" id="niche" name="niche" placeholder="e.g. Specialty Auto Repair" autocomplete="off">
-                    </div>
+                    <label>Target Niche</label>
+                    <input type="text" id="niche" name="niche" placeholder="e.g. Real Estate Agencies" required>
                 </div>
-                
-                <button type="submit" class="btn-execute" id="execute-btn">
-                    <i class="fas fa-bolt"></i>
-                    Initialize Sequence
+                <button type="submit" class="btn-submit">
+                    <i class="fas fa-rocket" style="margin-right: 0.5rem;"></i> Run Discovery Scan
                 </button>
             </form>
-        </div>
+        </section>
 
-        <div class="terminal-feed glass-panel">
-            <div class="terminal-header mono-text">
-                <div>// SYSTEM_LOG</div>
-                <div id="clock">00:00:00</div>
+        <section id="services" class="benefits-section">
+            <div class="section-header">
+                <h2>We Handle The Outreach. You Handle The Meetings.</h2>
+                <p style="color: var(--text-secondary); max-width: 600px; margin: 0 auto;">You didn't start your business to send cold emails or make cold calls. We take care of everything.</p>
             </div>
             
-            <div class="terminal-window" id="log-window">
-                <div class="log-line">
-                    <span class="log-timestamp" id="init-time"></span>
-                    <span class="log-sys">[SYS]</span>
-                    <span>Koe Syndicate uplink established. Awaiting command parameters.</span>
+            <div class="benefits-grid">
+                <div class="benefit-card">
+                    <div class="benefit-icon"><i class="fas fa-search-location"></i></div>
+                    <h3>Automated Lead Discovery</h3>
+                    <p>We scrape and qualify hundreds of hyper-local businesses that match your ideal customer profile automatically.</p>
+                </div>
+                <div class="benefit-card">
+                    <div class="benefit-icon"><i class="fas fa-phone-volume"></i></div>
+                    <h3>AI Voice Calling</h3>
+                    <p>Our autonomous SDR agents call prospects, handle objections, and qualify intent so you only speak to warm leads.</p>
+                </div>
+                <div class="benefit-card">
+                    <div class="benefit-icon"><i class="fas fa-calendar-check"></i></div>
+                    <h3>Auto-Booking</h3>
+                    <p>When a lead says yes, we instantly sync them to your calendar and CRM without any manual intervention.</p>
+                </div>
+                <div class="benefit-card">
+                    <div class="benefit-icon"><i class="fas fa-chart-line"></i></div>
+                    <h3>Predictable Pipeline</h3>
+                    <p>Scale your revenue predictably by treating your outbound engine as a mathematical formula.</p>
+                </div>
+                <div class="benefit-card">
+                    <div class="benefit-icon"><i class="fas fa-shield-alt"></i></div>
+                    <h3>No Spam Compliance</h3>
+                    <p>We ensure all outreach is compliant, targeted, and highly personalized to protect your brand reputation.</p>
+                </div>
+                <div class="benefit-card">
+                    <div class="benefit-icon"><i class="fas fa-sync"></i></div>
+                    <h3>CRM Integration</h3>
+                    <p>Everything syncs directly with HubSpot, Salesforce, or your custom CRM setup.</p>
                 </div>
             </div>
-        </div>
+        </section>
 
-    </div>
-
-    <script>
-        document.getElementById('init-time').textContent = new Date().toISOString().split('T')[1].split('.')[0];
-        
-        setInterval(() => {
-            document.getElementById('clock').textContent = new Date().toISOString().split('T')[1].split('.')[0];
-        }, 1000);
-
-        document.getElementById('init-form').addEventListener('submit', function(e) {
-            const btn = document.getElementById('execute-btn');
-            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> ENGAGING...';
-            btn.style.pointerEvents = 'none';
-            btn.style.opacity = '0.7';
-
-            const logWindow = document.getElementById('log-window');
-            const targetCity = document.getElementById('city').value;
-            const targetNiche = document.getElementById('niche').value || 'ALL_SECTORS';
-            
-            const timeStr = new Date().toISOString().split('T')[1].split('.')[0];
-            const html = `
-                <div class="log-line">
-                    <span class="log-timestamp">${timeStr}</span>
-                    <span class="log-sys" style="color:var(--neon-green)">[CMD]</span>
-                    <span>Executing target acquisition in ${targetCity} for [${targetNiche}]</span>
+        <section id="how-it-works" class="feature-section">
+            <div class="feature-content">
+                <span class="hero-pill" style="margin-bottom: 1rem;">Lead Discovery</span>
+                <h2>Show Up Higher. Get More Leads.</h2>
+                <p>Most businesses struggle because they are invisible to their ideal prospects. We flip the script.</p>
+                <p>Our proprietary scrapers find businesses that need your services, enriching data with decision-maker contacts, technology stacks, and recent buying signals.</p>
+            </div>
+            <div class="feature-visual">
+                <img src="https://images.unsplash.com/photo-1460925895917-afdab827c52f?ixlib=rb-4.0.3&auto=format&fit=crop&w=800&q=80" alt="Dashboard" style="width: 100%; border-radius: 1rem; box-shadow: 0 10px 30px rgba(0,0,0,0.1);">
+                <div style="position: absolute; top: -20px; left: -20px; background: white; padding: 1rem; border-radius: 0.5rem; box-shadow: 0 4px 15px rgba(0,0,0,0.1); display: flex; align-items: center; gap: 1rem; font-weight: bold;">
+                    <i class="fas fa-check-circle" style="color: var(--success-green); font-size: 1.5rem;"></i> 250+ Leads Found
                 </div>
-            `;
-            logWindow.insertAdjacentHTML('beforeend', html);
-        });
-    </script>
+            </div>
+        </section>
+
+        <section class="feature-section reverse">
+            <div class="feature-content">
+                <span class="hero-pill" style="margin-bottom: 1rem;">AI SDR Agent</span>
+                <h2>Publish Everywhere. Stay Visible.</h2>
+                <p>You're too busy running your business to spend 4 hours a day on cold calls. We get it.</p>
+                <p>Our AI agents handle the heavy lifting: navigating gatekeepers, dropping value propositions, and discovering pain points over the phone in real-time.</p>
+            </div>
+            <div class="feature-visual">
+                <img src="https://images.unsplash.com/photo-1551288049-bebda4e38f71?ixlib=rb-4.0.3&auto=format&fit=crop&w=800&q=80" alt="Analytics" style="width: 100%; border-radius: 1rem; box-shadow: 0 10px 30px rgba(0,0,0,0.1);">
+                <div style="position: absolute; bottom: -20px; right: -20px; background: white; padding: 1rem; border-radius: 0.5rem; box-shadow: 0 4px 15px rgba(0,0,0,0.1); display: flex; align-items: center; gap: 1rem; font-weight: bold;">
+                    <i class="fas fa-phone" style="color: var(--primary-accent); font-size: 1.5rem;"></i> 45 Meetings Booked
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <footer style="text-align: center; padding: 3rem; color: var(--text-secondary); border-top: 1px solid var(--border-color); margin-top: 4rem;">
+        <p>&copy; 2026 KOE Syndicate. All rights reserved.</p>
+    </footer>
 </body>
 </html>
