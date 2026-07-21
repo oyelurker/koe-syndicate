@@ -202,6 +202,7 @@ export default function CtaWithFooter01Finsyc({ className }: { className?: strin
                 >
                   <input
                     type="email"
+                    suppressHydrationWarning
                     placeholder="Enter your email"
                     className="flex-1 bg-transparent border-none outline-none px-4 py-2 sm:py-0 font-sans text-[18px] text-[#042718] placeholder:text-[#042718]/60"
                   />

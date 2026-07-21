@@ -1,16 +1,21 @@
 "use client";
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, Suspense } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { Sidebar } from '@/components/dashboard/Sidebar';
 import { Pipeline } from '@/components/dashboard/Pipeline';
 import { TerminalFeed } from '@/components/dashboard/TerminalFeed';
 import { SdrModal } from '@/components/dashboard/Modals';
 import { MOCK_BUSINESSES, MOCK_UPDATES, Business, AgentUpdate } from '@/components/dashboard/data';
 
-export default function Dashboard() {
+function DashboardContent() {
+  const searchParams = useSearchParams();
+  const cityParam = searchParams.get('city') || "SAN FRANCISCO";
+  const nicheParam = searchParams.get('niche') || "";
+
   const [businesses, setBusinesses] = useState<Business[]>(MOCK_BUSINESSES);
   const [updates, setUpdates] = useState<AgentUpdate[]>(MOCK_UPDATES);
-  const [activeOperation] = useState("SAN FRANCISCO");
+  const [activeOperation, setActiveOperation] = useState(`${cityParam} ${nicheParam ? `- ${nicheParam}` : ''}`.toUpperCase());
 
   // Modal State
   const [isSdrModalOpen, setIsSdrModalOpen] = useState(false);
@@ -62,18 +67,22 @@ export default function Dashboard() {
   };
 
   return (
-    <div className="flex h-screen bg-[#0F0F19] text-gray-200 overflow-hidden font-sans">
+    <div className="flex h-screen bg-[#f8f9fa] text-[#042718] overflow-hidden font-inter">
       <Sidebar 
         businesses={businesses}
         onTriggerLeadManager={handleTriggerLeadManager}
         onReset={handleReset}
       />
 
-      <main className="flex-1 flex flex-col p-8 overflow-hidden bg-[url('/grid.svg')] bg-center bg-fixed">
-        <div className="mb-6 font-mono">
-          <div className="text-gray-400 text-sm mb-1">// ACTIVE OPERATION: {activeOperation}</div>
-          <div className="text-sm">
-            STATUS: <span className="text-[#00ff88] animate-pulse">ACTIVE</span>
+      <main className="flex-1 flex flex-col p-8 overflow-hidden bg-white/50">
+        <div className="mb-8 flex items-center justify-between">
+          <div>
+            <h2 className="font-onest text-2xl font-bold tracking-tight text-[#042718]">Active Discovery Scan</h2>
+            <div className="text-gray-500 font-medium mt-1">OPERATION: {activeOperation}</div>
+          </div>
+          <div className="flex items-center gap-2 px-4 py-2 bg-green-50 text-green-700 rounded-full font-medium text-sm border border-green-200">
+            <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
+            STATUS: ACTIVE
           </div>
         </div>
 
@@ -92,5 +101,13 @@ export default function Dashboard() {
         onConfirm={handleConfirmOutreach}
       />
     </div>
+  );
+}
+
+export default function Dashboard() {
+  return (
+    <Suspense fallback={<div className="flex h-screen items-center justify-center bg-[#f8f9fa] font-onest text-xl font-bold text-[#042718]">Loading Dashboard...</div>}>
+      <DashboardContent />
+    </Suspense>
   );
 }

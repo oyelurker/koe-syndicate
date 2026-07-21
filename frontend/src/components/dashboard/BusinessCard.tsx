@@ -1,6 +1,5 @@
-"use client";
-
 import React from 'react';
+import { Phone, MapPin, ExternalLink } from 'lucide-react';
 import { Business } from './data';
 
 interface BusinessCardProps {
@@ -9,44 +8,70 @@ interface BusinessCardProps {
 }
 
 export function BusinessCard({ business, onInitiateOutreach }: BusinessCardProps) {
-  // Determine styles based on status
-  let borderColor = 'border-[#00ff88]/20';
-  let hoverBorderColor = 'hover:border-[#00ff88] hover:shadow-[0_0_10px_rgba(0,255,136,0.1)]';
-  let badgeColor = 'text-[#00ff88] bg-[#00ff88]/10 border-[#00ff88]';
-  
-  if (business.status === 'converting') {
-    borderColor = 'border-[#00E5FF]';
-    hoverBorderColor = 'hover:border-[#00E5FF] hover:shadow-[0_0_10px_rgba(0,229,255,0.1)]';
-    badgeColor = 'text-[#00E5FF] bg-transparent border-[#00E5FF]';
-  } else if (business.status === 'meeting_scheduled') {
-    borderColor = 'border-[#FF00FF]';
-    hoverBorderColor = 'hover:border-[#FF00FF] hover:shadow-[0_0_10px_rgba(255,0,255,0.1)]';
-    badgeColor = 'text-[#FF00FF] bg-transparent border-[#FF00FF]';
-  }
+  const isEngaged = ['contacted', 'engaged', 'converting', 'meeting_scheduled'].includes(business.status);
 
   return (
-    <div className={`bg-black/60 border ${borderColor} p-4 rounded cursor-pointer transition-all duration-300 ${hoverBorderColor}`}>
-      <h4 className="m-0 mb-2 text-white text-[0.95rem]">{business.name}</h4>
+    <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm hover:shadow-md transition-all duration-200 group flex flex-col gap-3 relative">
+      <div className="flex justify-between items-start">
+        <h4 className="font-onest font-semibold text-[#042718] text-lg leading-tight group-hover:text-[#063b24] transition-colors">{business.name}</h4>
+        {isEngaged && (
+          <span className="flex h-2.5 w-2.5 relative flex-shrink-0 mt-1.5">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-green-500"></span>
+          </span>
+        )}
+      </div>
       
-      {business.status === 'found' ? (
-        <>
-          <div className="text-[0.8rem] text-gray-400 mb-2">
-            {business.city}<br />
-            {business.phone || 'No Phone'}
-          </div>
-          <button 
-            onClick={(e) => {
-              e.stopPropagation();
-              onInitiateOutreach?.(business);
-            }}
-            className="w-full mt-2 bg-transparent border border-[#00ff88] text-[#00ff88] p-2 cursor-pointer font-mono text-[0.8rem] rounded hover:bg-[#00ff88]/10 transition-colors"
-          >
-            INITIATE OUTREACH
-          </button>
-        </>
-      ) : (
-        <div className={`inline-block text-[0.7rem] px-2 py-0.5 border rounded-sm font-mono uppercase ${badgeColor}`}>
-          {business.status.replace('_', ' ')}
+      <div className="space-y-2.5 font-inter">
+        <div className="flex items-center gap-2 text-sm text-gray-600">
+          <MapPin size={14} className="text-gray-400" /> 
+          <span className="truncate">{business.city || 'No city found'}</span>
+        </div>
+        <div className="flex items-center gap-2 text-sm text-gray-600">
+          <Phone size={14} className="text-gray-400" /> 
+          <span>{business.phone || 'No phone found'}</span>
+        </div>
+      </div>
+
+      {business.status === 'found' && onInitiateOutreach && (
+        <button 
+          onClick={(e) => {
+            e.stopPropagation();
+            onInitiateOutreach(business);
+          }}
+          className="mt-2 w-full py-2.5 bg-white border border-gray-200 text-[#042718] font-inter font-medium text-sm rounded-lg hover:bg-gray-50 hover:border-gray-300 transition-colors flex items-center justify-center gap-2"
+        >
+          Draft Outreach <ExternalLink size={14} />
+        </button>
+      )}
+
+      {business.status === 'contacted' && (
+        <div className="mt-2 text-xs font-medium text-blue-600 font-inter bg-blue-50 px-3 py-2 rounded-lg border border-blue-100 flex items-center justify-center">
+          Email Sent - Waiting
+        </div>
+      )}
+
+      {(business.status === 'engaged' || business.status === 'converting') && (
+        <div className="mt-2 text-xs font-medium text-green-700 font-inter bg-green-50 px-3 py-2 rounded-lg border border-green-200 flex items-center justify-center">
+          Prospect Replied
+        </div>
+      )}
+
+      {business.status === 'not_interested' && (
+        <div className="mt-2 text-xs font-medium text-gray-500 font-inter bg-gray-50 px-3 py-2 rounded-lg border border-gray-200 flex items-center justify-center">
+          Not Interested
+        </div>
+      )}
+      
+      {business.status === 'no_response' && (
+        <div className="mt-2 text-xs font-medium text-gray-500 font-inter bg-gray-50 px-3 py-2 rounded-lg border border-gray-200 flex items-center justify-center">
+          No Response
+        </div>
+      )}
+
+      {business.status === 'meeting_scheduled' && (
+        <div className="mt-2 text-xs font-bold text-white font-inter bg-[#042718] px-3 py-2 rounded-lg flex items-center justify-center shadow-md">
+          Meeting Scheduled!
         </div>
       )}
     </div>

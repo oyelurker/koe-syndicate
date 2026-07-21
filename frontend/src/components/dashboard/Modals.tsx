@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState } from 'react';
-import { X } from 'lucide-react';
+import { X, Send } from 'lucide-react';
 import { Business } from './data';
 
 interface SdrModalProps {
@@ -24,42 +24,50 @@ export function SdrModal({ business, isOpen, onClose, onConfirm }: SdrModalProps
   if (!isOpen || !business) return null;
 
   return (
-    <div className="fixed inset-0 bg-black/80 flex justify-center items-center z-50 backdrop-blur-sm">
-      <div className="bg-[#0F0F19] border border-[#00ff88] p-8 rounded-lg w-[400px] shadow-[0_0_30px_rgba(0,255,136,0.15)] relative">
+    <div className="fixed inset-0 bg-black/50 flex justify-center items-center z-50 backdrop-blur-sm">
+      <div className="bg-white border border-gray-200 p-8 rounded-2xl w-[450px] shadow-2xl relative">
         <div className="flex justify-between items-center mb-6">
-          <h3 className="m-0 text-[#00ff88] font-mono tracking-wider">AUTHORIZE OUTREACH</h3>
+          <h3 className="m-0 text-[#042718] font-onest font-semibold text-xl tracking-tight">Draft Outreach</h3>
           <button 
             onClick={onClose}
-            className="bg-transparent border-none text-white cursor-pointer hover:text-[#00ff88] transition-colors"
+            className="text-gray-400 hover:text-gray-700 hover:bg-gray-100 p-1 rounded-full transition-colors"
           >
             <X size={20} />
           </button>
         </div>
         
         <div className="mb-6">
-          <div className="font-mono text-gray-400 mb-4 text-sm whitespace-pre-wrap leading-relaxed">
-            TARGET: {business.name}
-            <br />
-            LOC: {business.city}
+          <div className="font-inter text-gray-600 mb-5 text-sm p-4 bg-gray-50 rounded-xl border border-gray-100">
+            <span className="font-semibold block text-[#042718] mb-1">Target Prospect</span>
+            {business.name} &bull; {business.city}
           </div>
           <div className="flex flex-col gap-2">
-            <label className="font-mono text-sm text-gray-300">Target Ph. Number (Override)</label>
+            <label className="font-inter text-sm font-medium text-[#042718]">Target Phone Number</label>
             <input 
               type="tel" 
               value={phoneOverride}
               onChange={(e) => setPhoneOverride(e.target.value)}
-              className="w-full bg-[#05050A] border border-[#333] text-white p-3 font-mono rounded focus:border-[#00ff88] focus:outline-none transition-colors"
+              className="w-full bg-white border border-gray-200 text-[#042718] px-4 py-3 font-inter rounded-xl focus:border-[#042718] focus:ring-1 focus:ring-[#042718] focus:outline-none transition-colors"
               required
             />
+            <span className="text-xs text-gray-500 font-inter">The SDR Agent will contact this number directly.</span>
           </div>
         </div>
         
-        <button 
-          onClick={() => onConfirm(business, phoneOverride)}
-          className="w-full bg-[#00ff88]/10 border border-[#00ff88] text-[#00ff88] p-3 font-mono tracking-wider rounded hover:bg-[#00ff88]/20 transition-all shadow-[0_0_10px_rgba(0,255,136,0.2)] hover:shadow-[0_0_15px_rgba(0,255,136,0.4)] cursor-pointer"
-        >
-          INITIATE CONTACT
-        </button>
+        <div className="flex gap-3 justify-end">
+          <button 
+            onClick={onClose}
+            className="px-5 py-3 rounded-xl bg-white border border-gray-200 text-gray-700 font-inter font-medium hover:bg-gray-50 transition-colors"
+          >
+            Cancel
+          </button>
+          <button 
+            onClick={() => onConfirm(business, phoneOverride)}
+            className="flex items-center gap-2 px-6 py-3 bg-[#042718] text-white font-inter font-medium rounded-xl hover:bg-[#063b24] transition-colors shadow-md hover:shadow-lg"
+          >
+            <Send size={16} /> Deploy Agent
+          </button>
+        </div>
       </div>
     </div>
   );

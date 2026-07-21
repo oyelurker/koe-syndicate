@@ -2,9 +2,13 @@
 
 import React, { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { ArrowUpRight, Sparkles, Menu, X } from "lucide-react";
+import { ArrowUpRight, Sparkles, Menu, X, Search } from "lucide-react";
+import { useRouter } from "next/navigation";
 
 export default function FinsycOriginalHeader({ className }: { className?: string }) {
+  const router = useRouter();
+  const [city, setCity] = useState("");
+  const [niche, setNiche] = useState("");
   const [isNavHovered, setIsNavHovered] = useState(false);
   const [isCTAHovered, setIsCTAHovered] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -225,41 +229,72 @@ export default function FinsycOriginalHeader({ className }: { className?: string
               Automatically extract leads, qualify prospects, and execute voice and email outreach without lifting a finger.
             </motion.p>
 
-            {/* CTA Button */}
-            <motion.button
+            {/* CTA Form */}
+            <motion.form
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (city && niche) {
+                  router.push(`/dashboard?city=${encodeURIComponent(city)}&niche=${encodeURIComponent(niche)}`);
+                }
+              }}
               initial={{ y: 20, opacity: 0 }}
               animate={{ y: 0, opacity: 1 }}
               transition={{ delay: 1, duration: 0.8, ease: "easeOut" as const }}
-              onMouseEnter={() => setIsCTAHovered(true)}
-              onMouseLeave={() => setIsCTAHovered(false)}
-              layout
-              className={
-                "flex items-center gap-3 py-2 rounded-full bg-[#042718] mt-8 lg:mt-12 group cursor-pointer relative h-14 border border-white/20 transition-all duration-300 " +
-                (isCTAHovered ? "flex-row-reverse pl-2 pr-5" : "flex-row pl-5 pr-2")
-              }
+              className="flex flex-col sm:flex-row items-center gap-3 mt-8 lg:mt-12 bg-white/20 p-2 rounded-2xl sm:rounded-full backdrop-blur-md border border-white/40 shadow-xl w-full max-w-2xl"
             >
-              <motion.span
-                layout
-                className="font-inter text-base lg:text-[18px] font-medium leading-[28px] text-white"
+              <input 
+                type="text" 
+                placeholder="Target City (e.g., Bengaluru)" 
+                value={city}
+                onChange={(e) => setCity(e.target.value)}
+                required
+                className="w-full sm:flex-1 h-12 px-5 rounded-xl sm:rounded-full bg-white text-[#042718] font-inter placeholder:text-gray-400 outline-none focus:ring-2 focus:ring-[#042718]/20"
+              />
+              <input 
+                type="text" 
+                placeholder="Target Niche (e.g., Fintech)" 
+                value={niche}
+                onChange={(e) => setNiche(e.target.value)}
+                required
+                className="w-full sm:flex-1 h-12 px-5 rounded-xl sm:rounded-full bg-white text-[#042718] font-inter placeholder:text-gray-400 outline-none focus:ring-2 focus:ring-[#042718]/20"
+              />
+              <button
+                type="submit"
+                onMouseEnter={() => setIsCTAHovered(true)}
+                onMouseLeave={() => setIsCTAHovered(false)}
+                className="w-full sm:w-auto flex items-center justify-center gap-2 h-12 px-6 rounded-xl sm:rounded-full bg-[#042718] text-white font-inter font-medium hover:bg-[#063b24] transition-colors"
               >
-                Get 14-days free trial
-              </motion.span>
+                <span>Run Discovery Scan</span>
+                <Search className="w-4 h-4" />
+              </button>
+            </motion.form>
 
-              <motion.div
-                layout
-                className="w-10 h-10 rounded-full bg-white flex items-center justify-center relative overflow-hidden shrink-0"
-              >
-                <motion.div
-                  animate={{
-                    x: isCTAHovered ? [-24, 0] : 0,
-                    opacity: isCTAHovered ? [0, 1] : 1
+            {/* Presets */}
+            <motion.div
+              initial={{ y: 20, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              transition={{ delay: 1.1, duration: 0.8, ease: "easeOut" as const }}
+              className="flex flex-wrap items-center justify-center gap-2 mt-4"
+            >
+              <span className="font-inter text-sm text-[#042718] opacity-70 mr-2">Try:</span>
+              {[
+                { c: "Bengaluru", n: "IT Services" },
+                { c: "Mumbai", n: "Real Estate" },
+                { c: "Singapore", n: "SaaS" },
+                { c: "Dubai", n: "Hospitality" }
+              ].map((preset, idx) => (
+                <button
+                  key={idx}
+                  onClick={() => {
+                    setCity(preset.c);
+                    setNiche(preset.n);
                   }}
-                  transition={{ duration: 0.3, delay: isCTAHovered ? 0.1 : 0 }}
+                  className="px-3 py-1.5 rounded-full bg-white/40 hover:bg-white/60 border border-white/40 text-[#042718] font-inter text-sm transition-colors"
                 >
-                  <ArrowUpRight className="w-4 h-4 text-[#042718]" />
-                </motion.div>
-              </motion.div>
-            </motion.button>
+                  {preset.c} &bull; {preset.n}
+                </button>
+              ))}
+            </motion.div>
 
             {/* Bottom Branding Section */}
             <motion.div

@@ -2,6 +2,7 @@
 
 import React, { useEffect, useRef } from 'react';
 import { AgentUpdate } from './data';
+import { Activity } from 'lucide-react';
 
 interface TerminalFeedProps {
   updates: AgentUpdate[];
@@ -23,25 +24,28 @@ export function TerminalFeed({ updates }: TerminalFeedProps) {
   };
 
   return (
-    <div className="flex-1 flex flex-col bg-black/40 border border-[#333] rounded-lg overflow-hidden min-h-[200px] backdrop-blur-md">
-      <div className="p-3 border-b border-[#333] font-mono text-sm text-gray-400">
-        <div>// LIVE_TELEMETRY</div>
+    <div className="flex-1 flex flex-col bg-white border border-gray-200 rounded-2xl overflow-hidden min-h-[200px] shadow-sm">
+      <div className="p-4 border-b border-gray-100 bg-[#f8f9fa] flex items-center gap-2">
+        <Activity size={18} className="text-[#042718]" />
+        <span className="font-onest font-semibold text-[#042718] tracking-tight">Activity Log</span>
       </div>
       <div 
         ref={containerRef}
-        className="flex-1 p-4 overflow-y-auto font-mono text-sm flex flex-col gap-2"
+        className="flex-1 p-5 overflow-y-auto font-inter text-sm flex flex-col gap-3 custom-scrollbar"
       >
         {updates.map(update => {
-          let agentColor = 'text-gray-400';
-          if (update.agent_type === 'sdr') agentColor = 'text-[#FF00FF]'; // Magenta
-          else if (update.agent_type === 'lead_finder') agentColor = 'text-[#00ff88]'; // Green
-          else if (update.agent_type === 'lead_manager') agentColor = 'text-[#00E5FF]'; // Cyan
+          let badgeClass = 'bg-gray-100 text-gray-700 border-gray-200';
+          if (update.agent_type === 'sdr') badgeClass = 'bg-purple-50 text-purple-700 border-purple-200'; 
+          else if (update.agent_type === 'lead_finder') badgeClass = 'bg-blue-50 text-blue-700 border-blue-200'; 
+          else if (update.agent_type === 'lead_manager') badgeClass = 'bg-orange-50 text-orange-700 border-orange-200'; 
           
           return (
-            <div key={update.id} className="leading-tight mb-1">
-              <span className="text-[#666] mr-3">[{formatDate(update.timestamp)}]</span>
-              <span className={`${agentColor} font-bold mr-3`}>[{update.agent_type.toUpperCase()}]</span>
-              <span className="text-gray-300">{update.message}</span>
+            <div key={update.id} className="flex items-start gap-3 py-1">
+              <span className="text-gray-400 text-xs mt-1 shrink-0 whitespace-nowrap">{formatDate(update.timestamp)}</span>
+              <span className={`text-xs font-semibold px-2 py-0.5 rounded-md border ${badgeClass} shrink-0`}>
+                {update.agent_type.replace('_', ' ').toUpperCase()}
+              </span>
+              <span className="text-gray-700 leading-snug">{update.message}</span>
             </div>
           );
         })}
