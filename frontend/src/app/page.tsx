@@ -1,27 +1,27 @@
-import FinsycOriginalHeader from "@/components/templates/finance-management-landing-page-finsyc/Header 01 Finsyc";
-import MetricsWithLogo01Finsyc from "@/components/templates/finance-management-landing-page-finsyc/Metrics with logo 01 Finsyc";
-import OriginaFinsycFeature from "@/components/templates/finance-management-landing-page-finsyc/Feature 01 Finsyc";
-import FinsycOriginal4step from "@/components/templates/finance-management-landing-page-finsyc/How it Works 01 Finsyc";
-import WhyChooseUs01Finsyc from "@/components/templates/finance-management-landing-page-finsyc/Why Choose Us 01 Finsyc";
-import MetricAndTestimonials from "@/components/templates/finance-management-landing-page-finsyc/Metrics with Testimonial 01 Finsyc";
-import Pricing01Finsyc from "@/components/templates/finance-management-landing-page-finsyc/Pricing Plan 01 Finsyc";
-import Integration01Finsyc from "@/components/templates/finance-management-landing-page-finsyc/Integration 01 Finsyc";
-import Blog01Finsyc from "@/components/templates/finance-management-landing-page-finsyc/Blogs 01 Finsyc";
-import CtaWithFooter01Finsyc from "@/components/templates/finance-management-landing-page-finsyc/CTA with Footer 01 Finsyc";
+import KoeOriginalHeader from "@/components/templates/landing-page-koe/Header 01 Koe";
+import MetricsWithLogo01Koe from "@/components/templates/landing-page-koe/Metrics with logo 01 Koe";
+import OriginaKoeFeature from "@/components/templates/landing-page-koe/Feature 01 Koe";
+import KoeOriginal4step from "@/components/templates/landing-page-koe/How it Works 01 Koe";
+import WhyChooseUs01Koe from "@/components/templates/landing-page-koe/Why Choose Us 01 Koe";
+import MetricAndTestimonials from "@/components/templates/landing-page-koe/Metrics with Testimonial 01 Koe";
+import Pricing01Koe from "@/components/templates/landing-page-koe/Pricing Plan 01 Koe";
+import Integration01Koe from "@/components/templates/landing-page-koe/Integration 01 Koe";
+import Blog01Koe from "@/components/templates/landing-page-koe/Blogs 01 Koe";
+import CtaWithFooter01Koe from "@/components/templates/landing-page-koe/CTA with Footer 01 Koe";
 
 export default function Home() {
   return (
     <main className="min-h-screen bg-white">
-      <FinsycOriginalHeader />
-      <MetricsWithLogo01Finsyc />
-      <OriginaFinsycFeature />
-      <FinsycOriginal4step />
-      <WhyChooseUs01Finsyc />
+      <KoeOriginalHeader />
+      <MetricsWithLogo01Koe />
+      <OriginaKoeFeature />
+      <KoeOriginal4step />
+      <WhyChooseUs01Koe />
       <MetricAndTestimonials />
-      <Pricing01Finsyc />
-      <Integration01Finsyc />
-      <Blog01Finsyc />
-      <CtaWithFooter01Finsyc />
+      <Pricing01Koe />
+      <Integration01Koe />
+      <Blog01Koe />
+      <CtaWithFooter01Koe />
     </main>
   );
 }
