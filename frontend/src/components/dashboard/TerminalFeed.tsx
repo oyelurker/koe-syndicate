@@ -41,7 +41,7 @@ export function TerminalFeed({ updates }: TerminalFeedProps) {
           
           return (
             <div key={update.id} className="flex items-start gap-3 py-1">
-              <span className="text-gray-400 text-xs mt-1 shrink-0 whitespace-nowrap">{formatDate(update.timestamp)}</span>
+              <span suppressHydrationWarning className="text-gray-400 text-xs mt-1 shrink-0 whitespace-nowrap">{formatDate(update.timestamp)}</span>
               <span className={`text-xs font-semibold px-2 py-0.5 rounded-md border ${badgeClass} shrink-0`}>
                 {update.agent_type.replace('_', ' ').toUpperCase()}
               </span>

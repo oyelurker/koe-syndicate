@@ -21,6 +21,58 @@ function DashboardContent() {
   const [isSdrModalOpen, setIsSdrModalOpen] = useState(false);
   const [selectedBusiness, setSelectedBusiness] = useState<Business | null>(null);
 
+  // WebSocket Connection
+  useEffect(() => {
+    const wsUrl = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000/ws';
+    const ws = new WebSocket(wsUrl);
+
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        console.log("WebSocket event:", data);
+        
+        if (data.type === 'initial_state') {
+          if (data.businesses && data.businesses.length > 0) {
+            setBusinesses(data.businesses);
+          }
+        } else if (data.type === 'business_updated') {
+          setBusinesses(prev => {
+            const exists = prev.find(b => b.id === data.business.id);
+            if (exists) {
+              return prev.map(b => b.id === data.business.id ? data.business : b);
+            } else {
+              return [...prev, data.business];
+            }
+          });
+          
+          if (data.update) {
+            const newUpdate: AgentUpdate = {
+              id: `u${Date.now()}_${Math.random()}`,
+              timestamp: new Date().toISOString(),
+              agent_type: data.agent || 'system',
+              message: data.update.message || `Status updated to ${data.update.status}`
+            };
+            setUpdates(prev => [...prev, newUpdate]);
+          }
+        } else if (data.type === 'agent_status') {
+           const newUpdate: AgentUpdate = {
+              id: `u${Date.now()}_${Math.random()}`,
+              timestamp: new Date().toISOString(),
+              agent_type: data.agent || 'system',
+              message: data.message
+           };
+           setUpdates(prev => [...prev, newUpdate]);
+        }
+      } catch (err) {
+        console.error("Failed to parse websocket message", err);
+      }
+    };
+
+    return () => {
+      ws.close();
+    };
+  }, []);
+
   // Handlers
   const handleInitiateOutreach = (business: Business) => {
     setSelectedBusiness(business);

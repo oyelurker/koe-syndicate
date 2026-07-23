@@ -129,10 +129,11 @@ Write-Status "  Lead Finder:        http://127.0.0.1:8081"
 Write-Status "  Lead Manager:       http://127.0.0.1:8082"
 Write-Status "  SDR:                http://127.0.0.1:8084"
 Write-Status "  Gmail Listener:     http://127.0.0.1:8083"
-Write-Status "  UI Client:          http://127.0.0.1:8000  <- Dashboard"
+Write-Status "  UI Client (Backend): http://127.0.0.1:8000"
+Write-Status "  Next.js Dashboard:   http://localhost:3000"
 Write-Status "======================================================"
 
-if ($allOk) { Write-Ok "All services healthy! Dashboard -> http://localhost:8000" }
+if ($allOk) { Write-Ok "All services healthy! Next.js Dashboard -> http://localhost:3000" }
 else        { Write-Fail "One or more services crashed. Review output above." }
 
 Write-Host "`nUseful commands:" -ForegroundColor Cyan
