@@ -73,6 +73,26 @@ function DashboardContent() {
     };
   }, []);
 
+  // Fetch NVIDIA RAPIDS lead scores from backend on load
+  useEffect(() => {
+    const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';
+    fetch(`${backendUrl}/api/lead-scores`)
+      .then(res => res.ok ? res.json() : null)
+      .then(data => {
+        if (data && data.scores && Object.keys(data.scores).length > 0) {
+          console.log(`[RAPIDS] Loaded ${data.count} lead scores via ${data.engine}.`);
+          setBusinesses(prev => prev.map(b => ({
+            ...b,
+            ai_score: data.scores[b.name] ?? b.ai_score,
+          })));
+        }
+      })
+      .catch(() => {
+        // Silently fall back to mock scores already in state
+        console.log('[RAPIDS] Backend unavailable — using mock scores.');
+      });
+  }, []);
+
   // Handlers
   const handleInitiateOutreach = (business: Business) => {
     setSelectedBusiness(business);

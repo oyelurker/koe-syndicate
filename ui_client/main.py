@@ -21,6 +21,18 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# ── NVIDIA RAPIDS Lead Scoring ────────────────────────────────────────────────
+# Import the GPU-accelerated (or sklearn fallback) scoring engine.
+# score_leads() uses cuML Random Forest if NVIDIA RAPIDS is available.
+try:
+    sys.path.insert(0, str(Path(__file__).parent.parent))
+    from lead_scoring_ml import score_leads as _rapids_score_leads
+    RAPIDS_SCORING_AVAILABLE = True
+except Exception as _rapids_err:
+    RAPIDS_SCORING_AVAILABLE = False
+    _rapids_score_leads = None
+    logging.getLogger("UIClient").warning(f"RAPIDS scoring unavailable: {_rapids_err}")
+
 # Common project imports
 import common.config as config
 import httpx
@@ -148,6 +160,7 @@ app_state = {
     "websocket_connections": set(),  # Set[WebSocket]
     "session_id": None,
     "human_input_requests": {},  # dict[str, HumanInputRequest]
+    "lead_scores": {},  # dict[str, float] — NVIDIA RAPIDS scores keyed by business name
 }
 
 class ConnectionManager:
@@ -190,7 +203,23 @@ manager = ConnectionManager()
 async def lifespan(app: FastAPI):
     """Handles application startup and shutdown events."""
     logger.info("UI Client starting up...")
-    # Initialize any startup tasks here
+
+    # ── NVIDIA RAPIDS: Pre-score demo leads at startup ────────────────────────
+    if RAPIDS_SCORING_AVAILABLE:
+        try:
+            _demo_path = Path(__file__).parent.parent / "demo_leads.json"
+            if _demo_path.exists():
+                with open(_demo_path, "r") as _f:
+                    _demo_leads = json.load(_f)
+                app_state["lead_scores"] = _rapids_score_leads(_demo_leads)
+                logger.info(f"[RAPIDS] Scored {len(app_state['lead_scores'])} leads at startup.")
+            else:
+                logger.warning("[RAPIDS] demo_leads.json not found — scores unavailable until leads are generated.")
+        except Exception as _e:
+            logger.warning(f"[RAPIDS] Startup scoring failed: {_e}")
+    else:
+        logger.warning("[RAPIDS] Scoring engine not loaded — /api/lead-scores will return empty.")
+
     yield
     logger.info("UI Client shutting down...")
 
@@ -224,6 +253,63 @@ def format_datetime(dt: datetime) -> str:
 # Add custom filters to templates
 templates.env.filters["format_currency"] = format_currency
 templates.env.filters["format_datetime"] = format_datetime
+
+
+# ── NVIDIA RAPIDS: Lead Scores API ──────────────────────────────────────────
+# These endpoints expose the GPU-computed lead scores to the Next.js dashboard.
+
+from fastapi import APIRouter
+rapids_router = APIRouter(prefix="/api", tags=["RAPIDS"])
+
+@rapids_router.get("/lead-scores")
+async def get_lead_scores():
+    """
+    Returns NVIDIA RAPIDS (cuML) predictive conversion scores for all known leads.
+    Scores are computed at startup using a GPU-accelerated Random Forest classifier.
+    Falls back to sklearn on CPU if RAPIDS is not available.
+    """
+    return {
+        "scores": app_state.get("lead_scores", {}),
+        "engine": "nvidia-cuml" if (RAPIDS_SCORING_AVAILABLE and HAS_CUML_GLOBAL) else "sklearn-cpu" if RAPIDS_SCORING_AVAILABLE else "unavailable",
+        "count": len(app_state.get("lead_scores", {})),
+    }
+
+@rapids_router.post("/rescore")
+async def rescore_leads():
+    """
+    Re-runs the NVIDIA RAPIDS scoring engine on the current pipeline businesses
+    and updates the cached scores. Useful after new leads are added.
+    """
+    if not RAPIDS_SCORING_AVAILABLE:
+        return JSONResponse(status_code=503, content={"error": "RAPIDS scoring engine not available."})
+
+    try:
+        leads = [
+            {"name": b.name, "city": b.city, "rating": 4.0, "industry": "General"}
+            for b in app_state["businesses"].values()
+        ]
+        if not leads:
+            # Fall back to demo_leads.json
+            _demo_path = Path(__file__).parent.parent / "demo_leads.json"
+            if _demo_path.exists():
+                with open(_demo_path, "r") as f:
+                    leads = json.load(f)
+
+        app_state["lead_scores"] = _rapids_score_leads(leads)
+        return {"status": "ok", "scored": len(app_state["lead_scores"]), "scores": app_state["lead_scores"]}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+# Check if cuML was actually loaded (for the engine label)
+try:
+    import cuml as _cuml_check
+    HAS_CUML_GLOBAL = True
+except ImportError:
+    HAS_CUML_GLOBAL = False
+
+app.include_router(rapids_router)
+# ── End RAPIDS API ────────────────────────────────────────────────────────────
+
 
 async def call_lead_finder_agent_a2a(city: str, session_id: str, **kwargs) -> dict[str, Any]:
     """
