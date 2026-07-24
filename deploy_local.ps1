@@ -98,12 +98,20 @@ $sdrJob = Start-PySvc -Name "SDR"           -Module "sdr"
 $gmJob  = Start-PySvc -Name "GmailListener" -Module "gmail_pubsub_listener.gmail_listener_service"
 $uiJob  = Start-PySvc -Name "UIClient"      -Module "ui_client"
 
+$nextJob = Start-Job -Name "NextJS_Frontend" -ScriptBlock {
+    param($root)
+    Set-Location "$root\frontend"
+    npm run dev
+} -ArgumentList $projectRoot
+Write-Ok "NextJS Frontend started (Job #$($nextJob.Id))"
+
 $svcs = @(
-    [PSCustomObject]@{ Job=$lfJob;  Name="Lead Finder";           Port=8081 }
-    [PSCustomObject]@{ Job=$lmJob;  Name="Lead Manager";          Port=8082 }
-    [PSCustomObject]@{ Job=$sdrJob; Name="SDR";                   Port=8084 }
-    [PSCustomObject]@{ Job=$gmJob;  Name="Gmail PubSub Listener"; Port=8083 }
-    [PSCustomObject]@{ Job=$uiJob;  Name="UI Client";             Port=8000 }
+    [PSCustomObject]@{ Job=$lfJob;   Name="Lead Finder";           Port=8081 }
+    [PSCustomObject]@{ Job=$lmJob;   Name="Lead Manager";          Port=8082 }
+    [PSCustomObject]@{ Job=$sdrJob;  Name="SDR";                   Port=8084 }
+    [PSCustomObject]@{ Job=$gmJob;   Name="Gmail PubSub Listener"; Port=8083 }
+    [PSCustomObject]@{ Job=$uiJob;   Name="UI Client";             Port=8000 }
+    [PSCustomObject]@{ Job=$nextJob; Name="NextJS Dashboard";      Port=3000 }
 )
 
 # 7. Monitor 10 second crash window
