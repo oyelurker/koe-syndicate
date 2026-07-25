@@ -4,9 +4,11 @@ Google Calendar utility tools for Lead Manager.
 
 import uuid
 import logging
+import requests
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timedelta
 from google.oauth2 import service_account
+from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 import pytz
 
@@ -14,6 +16,29 @@ from google.adk.tools import FunctionTool
 from ..config import SERVICE_ACCOUNT_FILE, SALES_EMAIL, CALENDAR_SCOPES
 
 logger = logging.getLogger(__name__)
+
+def _get_user_credentials() -> Optional[Credentials]:
+    """Attempts to fetch user OAuth credentials from the UI client."""
+    try:
+        response = requests.get("http://localhost:8000/auth/credentials", timeout=2)
+        if response.status_code == 200:
+            data = response.json()
+            creds_data = data.get("credentials")
+            if creds_data:
+                logger.info(f"🔑 Using OAuth credentials for {data.get('email')}")
+                return Credentials(
+                    token=creds_data['token'],
+                    refresh_token=creds_data['refresh_token'],
+                    token_uri=creds_data['token_uri'],
+                    client_id=creds_data['client_id'],
+                    client_secret=creds_data['client_secret'],
+                    scopes=creds_data['scopes']
+                )
+    except Exception as e:
+        logger.debug(f"Could not fetch user credentials: {e}")
+    
+    logger.info("⚠️ Falling back to service account credentials")
+    return None
 
 def generate_available_slots(start_date, end_date, busy_slots, slot_duration=60):
     """Generate available time slots between busy periods"""
@@ -124,14 +149,18 @@ async def check_calendar_availability(days_ahead: int = 7) -> Dict[str, Any]:
     try:
         logger.info(f"📅 Checking calendar availability for next {days_ahead} days...")
         
-        # Create credentials with delegation
-        credentials = service_account.Credentials.from_service_account_file(
-            SERVICE_ACCOUNT_FILE, scopes=CALENDAR_SCOPES
-        )
-        delegated_creds = credentials.with_subject(SALES_EMAIL)
+        # Try to get user OAuth credentials first
+        user_creds = _get_user_credentials()
         
-        # Create Calendar service
-        service = build('calendar', 'v3', credentials=delegated_creds)
+        if user_creds:
+            service = build('calendar', 'v3', credentials=user_creds)
+        else:
+            # Create credentials with delegation (fallback)
+            credentials = service_account.Credentials.from_service_account_file(
+                SERVICE_ACCOUNT_FILE, scopes=CALENDAR_SCOPES
+            )
+            delegated_creds = credentials.with_subject(SALES_EMAIL)
+            service = build('calendar', 'v3', credentials=delegated_creds)
         
         # Get timezone
         calendar_info = service.calendars().get(calendarId='primary').execute()
@@ -237,11 +266,27 @@ async def create_meeting_with_lead(
     try:
         logger.info(f"📅 Creating meeting with {lead_name} ({lead_email})...")
         
-        credentials = service_account.Credentials.from_service_account_file(
-            SERVICE_ACCOUNT_FILE, scopes=CALENDAR_SCOPES
-        )
-        delegated_creds = credentials.with_subject(SALES_EMAIL)
-        service = build('calendar', 'v3', credentials=delegated_creds)
+        # Try to get user OAuth credentials first
+        user_creds = _get_user_credentials()
+        
+        if user_creds:
+            service = build('calendar', 'v3', credentials=user_creds)
+            # Fetch the actual email of the authenticated user to add as organizer
+            organizer_email = None
+            try:
+                oauth_service = build('oauth2', 'v2', credentials=user_creds)
+                organizer_email = oauth_service.userinfo().get().execute().get('email')
+            except Exception as e:
+                logger.warning(f"Could not fetch user email for organizer: {e}")
+            
+            actual_sales_email = organizer_email or SALES_EMAIL
+        else:
+            credentials = service_account.Credentials.from_service_account_file(
+                SERVICE_ACCOUNT_FILE, scopes=CALENDAR_SCOPES
+            )
+            delegated_creds = credentials.with_subject(SALES_EMAIL)
+            service = build('calendar', 'v3', credentials=delegated_creds)
+            actual_sales_email = SALES_EMAIL
         
         # (Your time determination logic remains the same)
         if preferred_date and preferred_time:
@@ -265,12 +310,12 @@ async def create_meeting_with_lead(
         # --- REFACTORED ATTENDEE LOGIC ---
         # 1. Start with the organizer (required for sending notifications)
         final_attendees_list = [{
-            'email': SALES_EMAIL,
+            'email': actual_sales_email,
             'organizer': True,
             'responseStatus': 'accepted'
         }]
         # Keep track of emails to avoid duplicates
-        added_emails = {SALES_EMAIL.lower()}
+        added_emails = {actual_sales_email.lower()}
 
         # 2. Add the primary lead
         if lead_email.lower() not in added_emails:
