@@ -51,8 +51,9 @@ if (-not $apiKey -or $apiKey -eq "your_google_api_key_here") {
 Write-Ok "GOOGLE_API_KEY is set"
 
 # 4. Free required ports
-Write-Status "`nChecking ports 8000, 8081, 8082, 8083, 8084 ..."
-foreach ($port in @(8000, 8081, 8082, 8083, 8084)) {
+# 4. Free required ports
+Write-Status "`nChecking ports 3000, 8000, 8081, 8082, 8083, 8084 ..."
+foreach ($port in @(3000, 8000, 8081, 8082, 8083, 8084)) {
     $conn = Get-NetTCPConnection -LocalPort $port -ErrorAction SilentlyContinue
     if ($conn) {
         $oPid = ($conn.OwningProcess | Select-Object -First 1)
@@ -68,7 +69,9 @@ foreach ($port in @(8000, 8081, 8082, 8083, 8084)) {
 # 5. Collect env vars to forward to jobs
 $envVars = @{}
 foreach ($k in @("GOOGLE_API_KEY","GOOGLE_MAPS_API_KEY","GOOGLE_CLOUD_PROJECT",
-                  "DATASET_ID","TABLE_ID","MODEL","TEMPERATURE","TOP_P","TOP_K","FORCE_SIMPLE_MODE")) {
+                  "DATASET_ID","TABLE_ID","MODEL","TEMPERATURE","TOP_P","TOP_K","FORCE_SIMPLE_MODE",
+                  "GOOGLE_OAUTH_CLIENT_ID","GOOGLE_OAUTH_CLIENT_SECRET","GOOGLE_OAUTH_REDIRECT_URI",
+                  "SESSION_SECRET", "ELEVENLABS_API_KEY")) {
     $envVars[$k] = [System.Environment]::GetEnvironmentVariable($k, "Process")
 }
 

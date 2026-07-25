@@ -19,6 +19,14 @@ from datetime import datetime
 from enum import Enum
 from dotenv import load_dotenv
 
+# Google OAuth imports
+import google.oauth2.credentials
+from google_auth_oauthlib.flow import Flow
+from googleapiclient.discovery import build
+from itsdangerous import URLSafeSerializer
+
+from . import db
+
 load_dotenv()
 
 # ── NVIDIA RAPIDS Lead Scoring ────────────────────────────────────────────────
@@ -42,6 +50,7 @@ from fastapi import Depends, FastAPI, Form, Request, WebSocket, WebSocketDisconn
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from fastapi.middleware.cors import CORSMiddleware
 
 UI_CLIENT_LOGGER = "UIClient"
 BUSINESS_LOGIC_LOGGER = "BusinessLogic"
@@ -163,6 +172,10 @@ app_state = {
     "lead_scores": {},  # dict[str, float] — NVIDIA RAPIDS scores keyed by business name
 }
 
+# Session Signer
+SESSION_SECRET = os.getenv("SESSION_SECRET", "koe-syndicate-secret-dev-key")
+signer = URLSafeSerializer(SESSION_SECRET)
+
 class ConnectionManager:
     """Manages WebSocket connections for real-time updates."""
     
@@ -203,6 +216,10 @@ manager = ConnectionManager()
 async def lifespan(app: FastAPI):
     """Handles application startup and shutdown events."""
     logger.info("UI Client starting up...")
+    
+    # Initialize SQLite database
+    await db.init_db()
+    logger.info("Database initialized successfully.")
 
     # ── NVIDIA RAPIDS: Pre-score demo leads at startup ────────────────────────
     if RAPIDS_SCORING_AVAILABLE:
@@ -224,6 +241,16 @@ async def lifespan(app: FastAPI):
     logger.info("UI Client shutting down...")
 
 app = FastAPI(lifespan=lifespan, debug=True)
+
+# Add CORS Middleware to allow requests from the frontend with cookies
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[os.getenv("NEXT_PUBLIC_FRONTEND_URL", "http://localhost:3000")],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 templates = Jinja2Templates(directory=str(templates_dir))
 
 # Mount static files with additional logging
@@ -310,6 +337,176 @@ except ImportError:
 app.include_router(rapids_router)
 # ── End RAPIDS API ────────────────────────────────────────────────────────────
 
+# ── Google OAuth API ──────────────────────────────────────────────────────────
+# Enables per-user Calendar connection
+
+auth_router = APIRouter(prefix="/auth", tags=["Auth"])
+
+# These should match your Google Cloud Console OAuth configuration
+CLIENT_ID = os.getenv("GOOGLE_OAUTH_CLIENT_ID")
+CLIENT_SECRET = os.getenv("GOOGLE_OAUTH_CLIENT_SECRET")
+REDIRECT_URI = os.getenv("GOOGLE_OAUTH_REDIRECT_URI", "http://localhost:8000/auth/google/callback")
+SCOPES = [
+    'https://www.googleapis.com/auth/calendar',
+    'https://www.googleapis.com/auth/calendar.events',
+    'https://www.googleapis.com/auth/userinfo.email',
+    'openid'
+]
+
+def get_client_config():
+    return {
+        "web": {
+            "client_id": CLIENT_ID,
+            "project_id": "koe-syndicate",
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token",
+            "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+            "client_secret": CLIENT_SECRET,
+            "redirect_uris": [REDIRECT_URI]
+        }
+    }
+
+@auth_router.get("/google")
+async def login_google():
+    """Starts the OAuth flow and returns the authorization URL."""
+    if not CLIENT_ID or not CLIENT_SECRET:
+        return JSONResponse(status_code=500, content={"error": "OAuth credentials not configured in backend .env"})
+
+    flow = Flow.from_client_config(
+        get_client_config(),
+        scopes=SCOPES,
+        redirect_uri=REDIRECT_URI
+    )
+    
+    # Generate URL for request to Google's OAuth 2.0 server
+    auth_url, _ = flow.authorization_url(
+        access_type='offline',
+        include_granted_scopes='true',
+        prompt='consent'
+    )
+    
+    return RedirectResponse(url=auth_url)
+
+@auth_router.get("/google/callback")
+async def auth_google_callback(code: str):
+    """Exchanges auth code for tokens and stores in SQLite, sets session cookie."""
+    try:
+        flow = Flow.from_client_config(
+            get_client_config(),
+            scopes=SCOPES,
+            redirect_uri=REDIRECT_URI
+        )
+        flow.fetch_token(code=code)
+        credentials = flow.credentials
+        
+        # Get user email
+        service = build('oauth2', 'v2', credentials=credentials)
+        user_info = service.userinfo().get().execute()
+        
+        # Save to DB
+        user_id = await db.upsert_user(user_info, credentials)
+        
+        # Create session
+        session_id = str(uuid.uuid4())
+        await db.create_session(session_id, user_id)
+        
+        logger.info(f"Successfully authenticated Google user: {user_info.get('email')}")
+        
+        # Redirect back to the frontend dashboard
+        frontend_url = os.getenv("NEXT_PUBLIC_FRONTEND_URL", "http://localhost:3000")
+        response = RedirectResponse(url=f"{frontend_url}/dashboard?auth=success")
+        
+        # Set signed cookie
+        signed_session_id = signer.dumps(session_id)
+        response.set_cookie(
+            key="koe_session",
+            value=signed_session_id,
+            httponly=True,
+            max_age=30 * 24 * 60 * 60, # 30 days
+            samesite="lax"
+        )
+        return response
+        
+    except Exception as e:
+        logger.error(f"OAuth callback failed: {e}")
+        frontend_url = os.getenv("NEXT_PUBLIC_FRONTEND_URL", "http://localhost:3000")
+        return RedirectResponse(url=f"{frontend_url}/dashboard?auth=error")
+
+@auth_router.get("/status")
+async def get_auth_status(request: Request):
+    """Returns the current connection status for the frontend UI by reading the cookie."""
+    cookie = request.cookies.get("koe_session")
+    if cookie:
+        try:
+            session_id = signer.loads(cookie)
+            user = await db.get_user_by_session(session_id)
+            if user:
+                return {
+                    "connected": True,
+                    "email": user["email"],
+                    "name": user["name"],
+                    "picture": user["picture"]
+                }
+        except Exception as e:
+            logger.debug(f"Invalid session cookie: {e}")
+            
+    return {
+        "connected": False,
+        "email": None
+    }
+
+@auth_router.post("/disconnect")
+async def disconnect_google(request: Request):
+    """Clears stored tokens."""
+    response = JSONResponse(content={"status": "disconnected"})
+    
+    cookie = request.cookies.get("koe_session")
+    if cookie:
+        try:
+            session_id = signer.loads(cookie)
+            await db.delete_session(session_id)
+        except Exception:
+            pass
+            
+    response.delete_cookie("koe_session")
+    return response
+
+@auth_router.get("/credentials")
+async def get_internal_credentials(request: Request):
+    """
+    Internal endpoint for Lead Manager to grab user credentials.
+    In a full multi-user setup, we would pass the session_id or user_id from the Lead Manager.
+    For this demo, if we don't have a specific cookie (A2A call), we fetch the most recently connected user.
+    """
+    # Only allow localhost for security
+    if request.client.host not in ["127.0.0.1", "localhost", "::1"]:
+        return JSONResponse(status_code=403, content={"error": "Forbidden"})
+        
+    user = None
+    
+    # If the request somehow has the cookie (e.g. proxy)
+    cookie = request.cookies.get("koe_session")
+    if cookie:
+        try:
+            session_id = signer.loads(cookie)
+            user = await db.get_user_by_session(session_id)
+        except Exception:
+            pass
+            
+    # Fallback for A2A background jobs that don't have cookies
+    if not user:
+        user = await db.get_default_user_credentials()
+        
+    if not user:
+        return JSONResponse(status_code=404, content={"error": "No credentials stored"})
+        
+    return {
+        "credentials": user["credentials"],
+        "email": user["email"]
+    }
+
+app.include_router(auth_router)
+# ── End Google OAuth API ──────────────────────────────────────────────────────
 
 async def call_lead_finder_agent_a2a(city: str, session_id: str, **kwargs) -> dict[str, Any]:
     """
