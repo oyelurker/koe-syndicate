@@ -1,7 +1,7 @@
 "use client";
 
-import React from 'react';
-import { Mail, Power } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Mail, Power, Calendar, Check, AlertCircle } from 'lucide-react';
 import { Business } from './data';
 
 interface SidebarProps {
@@ -11,6 +11,52 @@ interface SidebarProps {
 }
 
 export function Sidebar({ businesses, onTriggerLeadManager, onReset }: SidebarProps) {
+  const [calendarEmail, setCalendarEmail] = useState<string | null>(null);
+
+  useEffect(() => {
+    // Check if we just authenticated
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get('auth') === 'success') {
+      // Clear the param
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
+    
+    // Fetch auth status
+    const fetchAuthStatus = async () => {
+      try {
+        const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';
+        const res = await fetch(`${backendUrl}/auth/status`, { credentials: 'include' });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.connected && data.email) {
+            setCalendarEmail(data.email);
+          } else {
+            setCalendarEmail(null);
+          }
+        }
+      } catch (err) {
+        console.error("Could not fetch auth status", err);
+      }
+    };
+    
+    fetchAuthStatus();
+  }, []);
+
+  const handleConnectCalendar = () => {
+    const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';
+    window.location.href = `${backendUrl}/auth/google`;
+  };
+
+  const handleDisconnectCalendar = async () => {
+    try {
+      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';
+      await fetch(`${backendUrl}/auth/disconnect`, { method: 'POST', credentials: 'include' });
+      setCalendarEmail(null);
+    } catch (err) {
+      console.error("Failed to disconnect", err);
+    }
+  };
+
   const engagedCount = businesses.filter(b => 
     ['contacted', 'engaged', 'converting', 'meeting_scheduled'].includes(b.status)
   ).length;
@@ -22,6 +68,41 @@ export function Sidebar({ businesses, onTriggerLeadManager, onReset }: SidebarPr
           KOE Syndicate
         </h1>
         <div className="font-inter text-sm text-gray-500 mt-1 font-medium">Ops Console</div>
+      </div>
+
+      <div className="bg-[#f8f9fa] border border-gray-200 p-4 rounded-xl shadow-sm">
+        <div className="flex items-center gap-2 font-inter text-sm font-medium mb-3">
+          <Calendar size={16} className={calendarEmail ? 'text-green-600' : 'text-amber-500'} />
+          <span className="text-gray-700">Google Calendar</span>
+        </div>
+        
+        {calendarEmail ? (
+          <div className="space-y-3">
+            <div className="flex items-center gap-2 text-xs text-green-700 bg-green-50 p-2 rounded-lg border border-green-100">
+              <Check size={14} />
+              <span className="truncate">{calendarEmail}</span>
+            </div>
+            <button 
+              onClick={handleDisconnectCalendar}
+              className="w-full text-xs text-gray-500 hover:text-gray-800 font-inter transition-colors text-left"
+            >
+              Disconnect
+            </button>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <div className="flex items-center gap-2 text-xs text-amber-700 bg-amber-50 p-2 rounded-lg border border-amber-100">
+              <AlertCircle size={14} className="shrink-0" />
+              <span>Not connected</span>
+            </div>
+            <button 
+              onClick={handleConnectCalendar}
+              className="w-full text-xs bg-white border border-gray-300 text-gray-700 py-2 rounded-lg hover:bg-gray-50 font-inter font-medium transition-colors"
+            >
+              Connect Calendar →
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="bg-[#f8f9fa] border border-gray-200 p-6 rounded-2xl text-center shadow-sm transition-shadow hover:shadow-md">

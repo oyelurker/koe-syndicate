@@ -32,3 +32,6 @@ test refrences can be picked/
 
 # Deployment Logs
 private_deployment.md
+
+# Local Database
+tokens.db

@@ -33,6 +33,28 @@ export function BusinessCard({ business, onInitiateOutreach }: BusinessCardProps
         </div>
       </div>
 
+      {/* NVIDIA RAPIDS Predictive Score Badge */}
+      {business.ai_score !== undefined && (
+        <div className={`flex items-center justify-between px-3 py-2 rounded-lg text-xs font-bold font-inter border ${
+          business.ai_score > 70
+            ? 'bg-[#f0fff4] text-[#166534] border-[#76B900]/40'
+            : business.ai_score > 40
+            ? 'bg-amber-50 text-amber-800 border-amber-200'
+            : 'bg-gray-50 text-gray-500 border-gray-200'
+        }`}>
+          <span className="flex items-center gap-1.5">
+            <svg width="10" height="10" viewBox="0 0 10 10" fill="currentColor" className={business.ai_score > 70 ? 'text-[#76B900]' : ''}>
+              <polygon points="5,0 10,10 0,10" />
+            </svg>
+            RAPIDS Score
+          </span>
+          <span className="font-mono text-sm">
+            {business.ai_score.toFixed(1)}%&nbsp;
+            {business.ai_score > 70 ? '↑' : business.ai_score > 40 ? '~' : '↓'}
+          </span>
+        </div>
+      )}
+
       {business.status === 'found' && onInitiateOutreach && (
         <button 
           onClick={(e) => {
