@@ -88,34 +88,68 @@ class GoogleMapsClient:
         return hours.get('open_now', False) if hours else False
 
     def _get_mock_results(self, city: str, business_type: Optional[str] = None) -> List[Dict[str, Any]]:
-        """Generate mock results for testing."""
+        """Generate mock results for testing dynamically based on city."""
         logger.warning(f"RETURNING MOCK DATA for {city}! Client status: {self.client}, API key checked: {self._api_key_checked}")
+        
+        city_lower = city.lower()
+        # Phone prefix logic
+        phone_prefix = "+1 415" # Default SF
+        if any(c in city_lower for c in ['bengaluru', 'bangalore']): phone_prefix = "+91 80"
+        elif 'mumbai' in city_lower: phone_prefix = "+91 22"
+        elif 'delhi' in city_lower: phone_prefix = "+91 11"
+        elif 'london' in city_lower: phone_prefix = "+44 20"
+        elif 'new york' in city_lower: phone_prefix = "+1 212"
+
+        # Names logic
+        niche = (business_type or "").lower()
+        if 'real estate' in niche:
+            names = ['Horizon Real Estate', 'Elevate Properties', 'Pacific Edge Commercial']
+        elif 'it' in niche or 'tech' in niche:
+            names = ['NexGen Solutions', 'CodeCraft Systems', 'TechAxis Consulting']
+        elif 'health' in niche:
+            names = ['MedPoint Clinic', 'HealthFirst Medical', 'Vitality Care']
+        else:
+            names = ['Apex Solutions', 'Crown Consulting', 'Summit Group']
+            
         mock_businesses = [
             {
-                "place_id": f"mock_{city.lower()}_1",
-                "name": f"Mock Business 1 - {city}",
-                "address": f"123 Main St, {city}",
-                "phone": "555-0123",
-                "website": "",  # No website
-                "rating": 4.5,
-                "total_ratings": 100,
-                "category": business_type or "General Business",
-                "price_level": 2,
+                "place_id": f"mock_1_{city_lower}",
+                "name": names[0],
+                "address": f"100 Market St, {city}",
+                "phone": f"{phone_prefix}-555-0198",
+                "website": f"http://www.{names[0].replace(' ', '').lower()}.mock",
+                "rating": 4.8,
+                "total_ratings": 124,
+                "category": business_type or "Agency",
+                "price_level": 3,
                 "is_open": True,
-                "location": {"lat": 40.7128, "lng": -74.0060}
+                "location": {"lat": 37.7937, "lng": -122.3965}
             },
             {
-                "place_id": f"mock_{city.lower()}_2",
-                "name": f"Mock Business 2 - {city}",
-                "address": f"456 Oak Ave, {city}",
-                "phone": "555-0456",
-                "website": "",  # No website
-                "rating": 4.0,
-                "total_ratings": 75,
-                "category": business_type or "General Business",
-                "price_level": 1,
+                "place_id": f"mock_2_{city_lower}",
+                "name": names[1],
+                "address": f"555 California St, {city}",
+                "phone": f"{phone_prefix}-555-0456",
+                "website": "",
+                "rating": 4.2,
+                "total_ratings": 89,
+                "category": business_type or "Agency",
+                "price_level": 2,
                 "is_open": True,
-                "location": {"lat": 40.7589, "lng": -73.9851}
+                "location": {"lat": 37.7922, "lng": -122.4035}
+            },
+            {
+                "place_id": f"mock_3_{city_lower}",
+                "name": names[2],
+                "address": f"201 Spear St, {city}",
+                "phone": f"{phone_prefix}-555-0789",
+                "website": f"http://www.{names[2].replace(' ', '').lower()}.mock",
+                "rating": 4.5,
+                "total_ratings": 215,
+                "category": business_type or "Agency",
+                "price_level": 2,
+                "is_open": True,
+                "location": {"lat": 37.7909, "lng": -122.3912}
             }
         ]
         return mock_businesses

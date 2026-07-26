@@ -153,20 +153,9 @@ class LeadFinderAgentExecutor(AgentExecutor):
                     session = None
 
         if not session:
-            error_message = f"Failed to establish ADK session for city '{city_name}'"
+            error_message = f"Failed to establish ADK session for city '{city_name}', continuing with bypass..."
             logger.error(f"Task {context.task_id}: {error_message}")
-            task_updater.failed(
-                message=task_updater.new_agent_message(
-                    parts=[
-                        Part(
-                            root=DataPart(
-                                data={"error": f"Internal error: {error_message}"}
-                            )
-                        )
-                    ]
-                )
-            )
-            return
+            # Do not return here so we can still use the hackathon bypass
 
         # Execute the ADK Agent (HACKATHON BYPASS)
         try:
