@@ -101,12 +101,9 @@ $sdrJob = Start-PySvc -Name "SDR"           -Module "sdr"
 $gmJob  = Start-PySvc -Name "GmailListener" -Module "gmail_pubsub_listener.gmail_listener_service"
 $uiJob  = Start-PySvc -Name "UIClient"      -Module "ui_client"
 
-$nextJob = Start-Job -Name "NextJS_Frontend" -ScriptBlock {
-    param($root)
-    Set-Location "$root\frontend"
-    npm run dev
-} -ArgumentList $projectRoot
-Write-Ok "NextJS Frontend started (Job #$($nextJob.Id))"
+# Launch NextJS in a separate process to ensure it boots reliably
+$nextProcess = Start-Process cmd.exe -ArgumentList "/c npm run dev" -WorkingDirectory "$projectRoot\frontend" -PassThru
+Write-Ok "NextJS Frontend started (PID $($nextProcess.Id))"
 
 $svcs = @(
     [PSCustomObject]@{ Job=$lfJob;   Name="Lead Finder";           Port=8081 }
@@ -114,7 +111,6 @@ $svcs = @(
     [PSCustomObject]@{ Job=$sdrJob;  Name="SDR";                   Port=8084 }
     [PSCustomObject]@{ Job=$gmJob;   Name="Gmail PubSub Listener"; Port=8083 }
     [PSCustomObject]@{ Job=$uiJob;   Name="UI Client";             Port=8000 }
-    [PSCustomObject]@{ Job=$nextJob; Name="NextJS Dashboard";      Port=3000 }
 )
 
 # 7. Monitor 10 second crash window
@@ -156,5 +152,6 @@ try { Wait-Job -Job ($svcs | ForEach-Object { $_.Job }) }
 finally {
     $svcs | ForEach-Object { Stop-Job   -Job $_.Job -ErrorAction SilentlyContinue }
     $svcs | ForEach-Object { Remove-Job -Job $_.Job -ErrorAction SilentlyContinue }
+    if ($nextProcess) { Stop-Process -Id $nextProcess.Id -Force -ErrorAction SilentlyContinue }
     Write-Ok "All services stopped."
 }
