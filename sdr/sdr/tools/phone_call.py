@@ -325,8 +325,7 @@ async def phone_call(business_data: dict[str, Any], proposal: str) -> dict[str, 
         debug_info["business_data"] = business_data
         debug_info["proposal"] = proposal
         
-        # FOR TESTING: Hardcoding user's phone number
-        business_phone = "+918595767831"
+        business_phone = business_data.get("phone") or business_data.get("phone_number")
     
         debug_info["extracted_phone"] = business_phone
         

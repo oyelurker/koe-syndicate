@@ -2,6 +2,8 @@ import aiosqlite
 import json
 import os
 from pathlib import Path
+from typing import Optional
+from google.oauth2.credentials import Credentials
 
 DB_PATH = Path(os.getenv("DB_PATH", "tokens.db"))
 
@@ -120,6 +122,21 @@ async def get_user_by_session(session_id: str):
                     }
                 }
             return None
+
+async def get_credentials_for_user(session_id: str) -> Optional[Credentials]:
+    user = await get_user_by_session(session_id)
+    if not user:
+        return None
+    
+    creds = user["credentials"]
+    return Credentials(
+        token=creds["token"],
+        refresh_token=creds["refresh_token"],
+        token_uri=creds["token_uri"],
+        client_id=creds["client_id"],
+        client_secret=creds["client_secret"],
+        scopes=creds["scopes"]
+    )
 
 async def delete_session(session_id: str):
     """Deletes a session."""

@@ -275,7 +275,7 @@ async def phone_number_validation_callback(
     tool_name = tool.name # Get the name of the tool being called
     
     # Only apply this callback to the phone call tool (or its test version)
-    if tool_name not in ["phone_call_tool", "phone_call_tool_test"]:
+    if tool_name not in ["phone_call", "phone_call_tool", "phone_call_tool_test"]:
         return None # Do nothing if it's not the relevant tool
 
     # The phone number is expected in the 'destination' argument for the phone_call_tool
@@ -318,7 +318,7 @@ async def prevent_duplicate_call_callback(
     tool_name = tool.name
     
     # Only apply this callback to the phone call tool
-    if tool_name not in ["phone_call_tool", "phone_call_tool_test"]:
+    if tool_name not in ["phone_call", "phone_call_tool", "phone_call_tool_test"]:
         return None
     
     # Check if call_result already exists in the state

@@ -19,6 +19,9 @@ from datetime import datetime
 from enum import Enum
 from dotenv import load_dotenv
 
+# Allow local HTTP testing for Google OAuth
+os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
+
 # Google OAuth imports
 import google.oauth2.credentials
 from google_auth_oauthlib.flow import Flow
@@ -367,37 +370,58 @@ def get_client_config():
     }
 
 @auth_router.get("/google")
-async def login_google():
-    """Starts the OAuth flow and returns the authorization URL."""
+async def login_google(city: str = "", niche: str = ""):
+    """Starts the OAuth flow by building the auth URL manually (no PKCE)."""
     if not CLIENT_ID or not CLIENT_SECRET:
         return JSONResponse(status_code=500, content={"error": "OAuth credentials not configured in backend .env"})
 
-    flow = Flow.from_client_config(
-        get_client_config(),
-        scopes=SCOPES,
-        redirect_uri=REDIRECT_URI
-    )
+    from urllib.parse import urlencode
+    import base64
+    import json
     
-    # Generate URL for request to Google's OAuth 2.0 server
-    auth_url, _ = flow.authorization_url(
-        access_type='offline',
-        include_granted_scopes='true',
-        prompt='consent'
-    )
-    
+    state_str = ""
+    if city or niche:
+        state_str = base64.b64encode(json.dumps({"city": city, "niche": niche}).encode()).decode()
+
+    params = {
+        "client_id": CLIENT_ID,
+        "redirect_uri": REDIRECT_URI,
+        "response_type": "code",
+        "scope": " ".join(SCOPES),
+        "access_type": "offline",
+        "prompt": "consent",
+        "state": state_str,
+    }
+    auth_url = f"https://accounts.google.com/o/oauth2/auth?{urlencode(params)}"
     return RedirectResponse(url=auth_url)
 
 @auth_router.get("/google/callback")
-async def auth_google_callback(code: str):
+async def auth_google_callback(code: str, state: str = ""):
     """Exchanges auth code for tokens and stores in SQLite, sets session cookie."""
     try:
-        flow = Flow.from_client_config(
-            get_client_config(),
+        import requests as http_requests
+        token_response = http_requests.post(
+            "https://oauth2.googleapis.com/token",
+            data={
+                "code": code,
+                "client_id": CLIENT_ID,
+                "client_secret": CLIENT_SECRET,
+                "redirect_uri": REDIRECT_URI,
+                "grant_type": "authorization_code",
+            }
+        ).json()
+
+        if "error" in token_response:
+            raise Exception(f"Token error: {token_response}")
+
+        credentials = google.oauth2.credentials.Credentials(
+            token=token_response.get("access_token"),
+            refresh_token=token_response.get("refresh_token"),
+            token_uri="https://oauth2.googleapis.com/token",
+            client_id=CLIENT_ID,
+            client_secret=CLIENT_SECRET,
             scopes=SCOPES,
-            redirect_uri=REDIRECT_URI
         )
-        flow.fetch_token(code=code)
-        credentials = flow.credentials
         
         # Get user email
         service = build('oauth2', 'v2', credentials=credentials)
@@ -414,7 +438,22 @@ async def auth_google_callback(code: str):
         
         # Redirect back to the frontend dashboard
         frontend_url = os.getenv("NEXT_PUBLIC_FRONTEND_URL", "http://localhost:3000")
-        response = RedirectResponse(url=f"{frontend_url}/dashboard?auth=success")
+        redirect_url = f"{frontend_url}/dashboard?auth=success"
+        
+        if state:
+            try:
+                import base64
+                import json
+                state_data = json.loads(base64.b64decode(state).decode())
+                if state_data.get("city"):
+                    redirect_url += f"&city={state_data['city']}"
+                if state_data.get("niche"):
+                    redirect_url += f"&niche={state_data['niche']}"
+            except Exception as e:
+                logger.error(f"Error decoding state: {e}")
+                pass
+                
+        response = RedirectResponse(url=redirect_url)
         
         # Set signed cookie
         signed_session_id = signer.dumps(session_id)
@@ -428,6 +467,9 @@ async def auth_google_callback(code: str):
         return response
         
     except Exception as e:
+        import traceback
+        with open("oauth_error.log", "w") as f:
+            f.write(traceback.format_exc())
         logger.error(f"OAuth callback failed: {e}")
         frontend_url = os.getenv("NEXT_PUBLIC_FRONTEND_URL", "http://localhost:3000")
         return RedirectResponse(url=f"{frontend_url}/dashboard?auth=error")
@@ -450,10 +492,54 @@ async def get_auth_status(request: Request):
         except Exception as e:
             logger.debug(f"Invalid session cookie: {e}")
             
-    return {
-        "connected": False,
-        "email": None
-    }
+    return {"connected": False}
+
+from pydantic import BaseModel
+class MeetingRequest(BaseModel):
+    lead_name: str
+    
+@auth_router.post("/schedule-meeting")
+async def schedule_meeting(req: MeetingRequest, request: Request):
+    """Creates a real Google Calendar event for the given lead."""
+    cookie = request.cookies.get("koe_session")
+    if not cookie:
+        return JSONResponse(status_code=401, content={"error": "Not authenticated"})
+        
+    try:
+        session_id = signer.loads(cookie)
+        creds = await db.get_credentials_for_user(session_id)
+        if not creds:
+            return JSONResponse(status_code=401, content={"error": "Credentials not found"})
+            
+        service = build('calendar', 'v3', credentials=creds)
+        
+        # Schedule for day after tomorrow at 10:00 AM local time
+        import datetime
+        day_after_tomorrow = datetime.datetime.now() + datetime.timedelta(days=2)
+        start_time = day_after_tomorrow.replace(hour=10, minute=0, second=0, microsecond=0)
+        end_time = start_time + datetime.timedelta(hours=1)
+        
+        event = {
+            'summary': f'KOE Syndicate × {req.lead_name} — Discovery Call (Demo Mode)',
+            'description': f'Auto-scheduled by KOE Syndicate AI Sales Agent.\nLead: {req.lead_name}',
+            'start': {
+                'dateTime': start_time.strftime('%Y-%m-%dT%H:%M:%S'),
+                'timeZone': 'Asia/Kolkata',
+            },
+            'end': {
+                'dateTime': end_time.strftime('%Y-%m-%dT%H:%M:%S'),
+                'timeZone': 'Asia/Kolkata',
+            },
+        }
+
+        created_event = service.events().insert(calendarId='primary', body=event).execute()
+        return {"success": True, "event_url": created_event.get('htmlLink'), "date": start_time.strftime('%b %d, %Y %I:%M %p')}
+        
+    except Exception as e:
+        logger.error(f"Failed to schedule meeting: {e}")
+        import traceback
+        traceback.print_exc()
+        return JSONResponse(status_code=500, content={"error": str(e)})
 
 @auth_router.post("/disconnect")
 async def disconnect_google(request: Request):
@@ -1729,6 +1815,61 @@ async def debug_static():
         static_files_info["static_files"] = "Directory does not exist"
     
     return static_files_info
+
+@app.get("/api/system-status")
+async def get_system_status():
+    """
+    Checks two things separately:
+    - call_ready: ElevenLabs / Twilio keys exist → real outbound calls can be made
+    - lead_finder_ready: Google Maps API billing is active → real lead search works
+    
+    The system is considered 'ready' if call_ready is True.
+    Maps API failure only triggers 'demo_leads' mode (mock businesses), not full demo mode.
+    """
+    import os
+    import httpx
+    
+    # ── Check call readiness (ElevenLabs / Twilio) ───────────────────────
+    elevenlabs_key = os.getenv("ELEVENLABS_API_KEY", "")
+    elevenlabs_agent = os.getenv("ELEVENLABS_AGENT_ID", "")
+    twilio_sid = os.getenv("TWILIO_ACCOUNT_SID", "")
+    
+    call_ready = bool(elevenlabs_key and elevenlabs_agent) or bool(twilio_sid)
+    
+    # ── Check lead finder (Google Maps API billing) ───────────────────────
+    maps_key = os.getenv("GOOGLE_MAPS_API_KEY", "")
+    lead_finder_ready = False
+    lead_finder_message = "Google Maps API key not configured"
+    
+    if maps_key:
+        try:
+            async with httpx.AsyncClient() as client:
+                res = await client.get(
+                    "https://maps.googleapis.com/maps/api/place/textsearch/json",
+                    params={"query": "coffee", "key": maps_key},
+                    timeout=5.0
+                )
+                data = res.json()
+                status = data.get("status", "")
+                if status in ("OK", "ZERO_RESULTS"):
+                    lead_finder_ready = True
+                    lead_finder_message = "Google Maps API active"
+                elif status == "REQUEST_DENIED":
+                    lead_finder_message = f"Google Maps billing not enabled — using realistic mock leads"
+                elif status == "OVER_QUERY_LIMIT":
+                    lead_finder_message = "Google Maps over quota — using realistic mock leads"
+                else:
+                    lead_finder_message = f"Google Maps status: {status}"
+        except Exception as e:
+            lead_finder_message = f"Maps API unreachable: {str(e)}"
+    
+    return {
+        "ready": call_ready,           # True = SDR/ElevenLabs calls work fine
+        "lead_finder_ready": lead_finder_ready,  # True = real Maps search works
+        "missing": [] if call_ready else ["ELEVENLABS_API_KEY or TWILIO_ACCOUNT_SID"],
+        "message": "System ready — outbound calls active" if call_ready else "Call agent not configured",
+        "lead_finder_message": lead_finder_message,
+    }
 
 if __name__ == "__main__":
     import uvicorn

@@ -345,6 +345,7 @@ class SDRAgentExecutor(AgentExecutor):
 
             # Log the complete final result
             logger.info(f"Task {context.task_id}: Complete final result: {json.dumps(final_result, indent=2)}")
+            log_to_file(f"Task {context.task_id}: Complete final result: {json.dumps(final_result, indent=2)}")
 
             task_updater.add_artifact(
                 parts=[Part(root=DataPart(data=final_result))],
@@ -353,12 +354,45 @@ class SDRAgentExecutor(AgentExecutor):
             task_updater.complete()
 
         except Exception as e:
+            error_msg = str(e)
+            user_facing_msg = f"ADK Agent error: {error_msg}"
+            
+            # Check for Gemini API Quota error and make it user-friendly
+            if "429" in error_msg or "Quota" in error_msg or "exhausted" in error_msg.lower():
+                user_facing_msg = "SDR outbound call blocked: Google API billing account, ElevenLabs, and Twilio trial credits exhausted. Please use Demo Mode."
+                
+            # Send HTTP POST to UI Client webhook
+            import httpx, asyncio
+            ui_client_url = context.session_state.get("ui_client_url", "http://127.0.0.1:8000")
+            
+            async def send_error_to_ui():
+                try:
+                    async with httpx.AsyncClient() as client:
+                        payload = {
+                            "agent_type": "sdr",
+                            "business_id": business_data.get("id", ""),
+                            "status": "no_response",
+                            "message": user_facing_msg
+                        }
+                        await client.post(f"{ui_client_url.rstrip('/')}/agent_callback", json=payload, timeout=5.0)
+                except Exception as ex:
+                    logger.error(f"Failed to send SDR error to UI: {ex}")
+            
+            try:
+                loop = asyncio.get_event_loop()
+                loop.create_task(send_error_to_ui())
+            except Exception:
+                asyncio.run(send_error_to_ui())
+                
             logger.exception(f"Task {context.task_id}: Error running SDR ADK agent for business {business_name}: {e}")
+            log_to_file(f"Task {context.task_id}: Error running SDR ADK agent for business {business_name}: {e}")
+            
             task_updater.failed(
                 message=task_updater.new_agent_message(
-                    parts=[Part(root=DataPart(data={"error": f"ADK Agent error: {e}"}))]
+                    parts=[Part(root=DataPart(data={"error": user_facing_msg}))]
                 )
             )
+            return None
 
     async def cancel(self, context: RequestContext, event_queue: EventQueue):
         logger.warning(f"Cancellation not implemented for SDR task: {context.task_id}")

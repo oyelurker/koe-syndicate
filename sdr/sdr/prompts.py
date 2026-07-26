@@ -103,7 +103,7 @@ OUTREACH_CALLER_PROMPT = """
 
    ### TOOL DEFINITION
    You have access to a single tool with the following structure:
-   - Tool Name: `phone_call_tool`
+   - Tool Name: `phone_call`
    - Arguments:
      - `business_data`: dict
      - `proposal`: str
@@ -117,7 +117,7 @@ OUTREACH_CALLER_PROMPT = """
        - If it's not there, check for a key named `"phone"`.
 
    2.  **Execute Action:**
-       - **If a phone number exists** under either key, you MUST immediately call the `phone_call_tool`.
+       - **If a phone number exists** under either key, you MUST immediately call the `phone_call` tool.
          - Pass the complete `state['business_data']` dictionary as the `business_data` argument.
          - Pass the `state['proposal']` string as the `proposal` argument.
        - **If NO phone number exists** in the data, DO NOT use the tool. Instead, your final output must be a JSON object reporting the error.
