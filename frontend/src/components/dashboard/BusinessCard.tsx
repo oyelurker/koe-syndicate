@@ -92,8 +92,18 @@ export function BusinessCard({ business, onInitiateOutreach }: BusinessCardProps
       )}
 
       {business.status === 'meeting_scheduled' && (
-        <div className="mt-2 text-xs font-bold text-white font-inter bg-[#042718] px-3 py-2 rounded-lg flex items-center justify-center shadow-md">
-          Meeting Scheduled!
+        <div className="mt-2 text-xs font-bold text-white font-inter bg-[#042718] px-3 py-2 rounded-lg shadow-md flex flex-col gap-1 items-center justify-center">
+          <div>{business.calendar_event_date ? `📅 ${business.calendar_event_date}` : 'Meeting Scheduled!'}</div>
+          {business.calendar_event_url && (
+            <a 
+              href={business.calendar_event_url} 
+              target="_blank" 
+              rel="noreferrer"
+              className="text-[10px] text-green-300 hover:text-green-200 underline mt-1"
+            >
+              View in Google Calendar ↗
+            </a>
+          )}
         </div>
       )}
     </div>

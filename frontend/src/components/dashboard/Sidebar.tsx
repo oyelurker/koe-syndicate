@@ -1,16 +1,18 @@
 "use client";
 
 import React, { useState, useEffect } from 'react';
-import { Mail, Power, Calendar, Check, AlertCircle } from 'lucide-react';
+import { Mail, Power, Calendar, Check, AlertCircle, Home } from 'lucide-react';
 import { Business } from './data';
 
 interface SidebarProps {
   businesses: Business[];
   onTriggerLeadManager: () => void;
   onReset: () => void;
+  onRunDemo: () => void;
+  isDemoRunning: boolean;
 }
 
-export function Sidebar({ businesses, onTriggerLeadManager, onReset }: SidebarProps) {
+export function Sidebar({ businesses, onTriggerLeadManager, onReset, onRunDemo, isDemoRunning }: SidebarProps) {
   const [calendarEmail, setCalendarEmail] = useState<string | null>(null);
 
   useEffect(() => {
@@ -44,7 +46,16 @@ export function Sidebar({ businesses, onTriggerLeadManager, onReset }: SidebarPr
 
   const handleConnectCalendar = () => {
     const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';
-    window.location.href = `${backendUrl}/auth/google`;
+    let extraParams = "";
+    if (typeof window !== "undefined") {
+      const currentUrl = new URL(window.location.href);
+      const city = currentUrl.searchParams.get('city') || '';
+      const niche = currentUrl.searchParams.get('niche') || '';
+      if (city || niche) {
+        extraParams = `?city=${encodeURIComponent(city)}&niche=${encodeURIComponent(niche)}`;
+      }
+    }
+    window.location.href = `${backendUrl}/auth/google${extraParams}`;
   };
 
   const handleDisconnectCalendar = async () => {
@@ -116,19 +127,32 @@ export function Sidebar({ businesses, onTriggerLeadManager, onReset }: SidebarPr
       </div>
 
       <div className="mt-auto flex flex-col gap-3">
-        <button 
-          onClick={onTriggerLeadManager}
-          className="flex items-center justify-center gap-2 w-full p-3 bg-blue-50 text-blue-700 font-inter font-medium text-sm rounded-xl hover:bg-blue-100 transition-colors border border-blue-100"
-          title="Trigger a mock email reply from a prospect"
-        >
-          <Mail size={16} /> Trigger Lead Manager
-        </button>
+        {isDemoRunning ? (
+          <div className="flex items-center justify-center gap-2 w-full p-3 bg-amber-50 text-amber-700 font-inter font-medium text-sm rounded-xl border border-amber-100">
+            <div className="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></div>
+            Simulation Running...
+          </div>
+        ) : (
+          <button 
+            onClick={onRunDemo}
+            className="flex items-center justify-center gap-2 w-full p-3 bg-blue-50 text-blue-700 font-inter font-medium text-sm rounded-xl hover:bg-blue-100 transition-colors border border-blue-100"
+            title="Start the animated demo simulation"
+          >
+            ▶ Start Demo Simulation
+          </button>
+        )}
         <button 
           onClick={onReset}
           className="flex items-center justify-center gap-2 w-full p-3 bg-white border border-gray-200 text-gray-600 font-inter font-medium text-sm rounded-xl hover:bg-gray-50 hover:text-gray-900 transition-colors"
         >
           <Power size={16} /> Reset State
         </button>
+        <a 
+          href="/"
+          className="flex items-center justify-center gap-2 w-full p-3 bg-white border border-gray-200 text-gray-600 font-inter font-medium text-sm rounded-xl hover:bg-gray-50 hover:text-gray-900 transition-colors"
+        >
+          <Home size={16} /> Back to Home
+        </a>
       </div>
     </div>
   );
