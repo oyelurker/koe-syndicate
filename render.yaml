@@ -8,10 +8,7 @@ services:
     startCommand: npm run start
     envVars:
       - key: NEXT_PUBLIC_BACKEND_URL
-        fromService:
-          name: ui-client
-          type: web
-          property: url
+        sync: false
 
   # 2. FastAPI UI Backend
   - type: web
@@ -19,16 +16,10 @@ services:
     env: docker
     dockerfilePath: ./Dockerfile.ui_client
     envVars:
-      - key: LEAD_FINDER_URL
-        fromService:
-          name: lead-finder
-          type: web
-          property: url
-      - key: SDR_URL
-        fromService:
-          name: sdr
-          type: web
-          property: url
+      - key: LEAD_FINDER_SERVICE_URL
+        sync: false
+      - key: SDR_SERVICE_URL
+        sync: false
       - key: GOOGLE_APPLICATION_CREDENTIALS_JSON
         sync: false
 
@@ -38,11 +29,8 @@ services:
     env: docker
     dockerfilePath: ./Dockerfile.lead_finder
     envVars:
-      - key: LEAD_MANAGER_URL
-        fromService:
-          name: lead-manager
-          type: web
-          property: url
+      - key: LEAD_MANAGER_SERVICE_URL
+        sync: false
       - key: GOOGLE_APPLICATION_CREDENTIALS_JSON
         sync: false
       - key: BING_SUBSCRIPTION_KEY
