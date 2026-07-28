@@ -1,0 +1,73 @@
+services:
+  # 1. Next.js Frontend
+  - type: web
+    name: frontend
+    env: node
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    startCommand: npm run start
+    envVars:
+      - key: NEXT_PUBLIC_BACKEND_URL
+        fromService:
+          name: ui-client
+          type: web
+          property: url
+
+  # 2. FastAPI UI Backend
+  - type: web
+    name: ui-client
+    env: docker
+    dockerfilePath: ./Dockerfile.ui_client
+    envVars:
+      - key: LEAD_FINDER_URL
+        fromService:
+          name: lead-finder
+          type: web
+          property: url
+      - key: SDR_URL
+        fromService:
+          name: sdr
+          type: web
+          property: url
+      - key: GOOGLE_APPLICATION_CREDENTIALS_JSON
+        sync: false
+
+  # 3. Lead Finder Service
+  - type: web
+    name: lead-finder
+    env: docker
+    dockerfilePath: ./Dockerfile.lead_finder
+    envVars:
+      - key: LEAD_MANAGER_URL
+        fromService:
+          name: lead-manager
+          type: web
+          property: url
+      - key: GOOGLE_APPLICATION_CREDENTIALS_JSON
+        sync: false
+      - key: BING_SUBSCRIPTION_KEY
+        sync: false
+
+  # 4. Lead Manager Service
+  - type: web
+    name: lead-manager
+    env: docker
+    dockerfilePath: ./Dockerfile.lead_manager
+    envVars:
+      - key: GOOGLE_APPLICATION_CREDENTIALS_JSON
+        sync: false
+
+  # 5. SDR Voice Service
+  - type: web
+    name: sdr
+    env: docker
+    dockerfilePath: ./Dockerfile.sdr
+    envVars:
+      - key: GOOGLE_APPLICATION_CREDENTIALS_JSON
+        sync: false
+      - key: ELEVENLABS_API_KEY
+        sync: false
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
