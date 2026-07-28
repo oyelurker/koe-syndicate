@@ -3,6 +3,7 @@ services:
   - type: web
     name: frontend
     env: node
+    plan: free
     rootDir: frontend
     buildCommand: npm install && npm run build
     startCommand: npm run start
@@ -14,6 +15,7 @@ services:
   - type: web
     name: ui-client
     env: docker
+    plan: free
     dockerfilePath: ./Dockerfile.ui_client
     envVars:
       - key: LEAD_FINDER_SERVICE_URL
@@ -27,6 +29,7 @@ services:
   - type: web
     name: lead-finder
     env: docker
+    plan: free
     dockerfilePath: ./Dockerfile.lead_finder
     envVars:
       - key: LEAD_MANAGER_SERVICE_URL
@@ -40,6 +43,7 @@ services:
   - type: web
     name: lead-manager
     env: docker
+    plan: free
     dockerfilePath: ./Dockerfile.lead_manager
     envVars:
       - key: GOOGLE_APPLICATION_CREDENTIALS_JSON
@@ -49,6 +53,7 @@ services:
   - type: web
     name: sdr
     env: docker
+    plan: free
     dockerfilePath: ./Dockerfile.sdr
     envVars:
       - key: GOOGLE_APPLICATION_CREDENTIALS_JSON
