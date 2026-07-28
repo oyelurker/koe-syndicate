@@ -24,7 +24,8 @@ Thumbs.db
 .idea/
 
 # Secrets / keys
-*.json
+*-service.json
+.secrets/
 !config.template
 
 #Local Testing
