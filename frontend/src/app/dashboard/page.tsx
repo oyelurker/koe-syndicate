@@ -27,6 +27,7 @@ function DashboardContent() {
   const [missingKeys, setMissingKeys] = useState<string[]>([]);
   const [systemReady, setSystemReady] = useState(false);
   const [isAuthChecking, setIsAuthChecking] = useState(true);
+  const [autoStartDemo, setAutoStartDemo] = useState(false);
 
   // Modal State
   const [isSdrModalOpen, setIsSdrModalOpen] = useState(false);
@@ -48,6 +49,7 @@ function DashboardContent() {
             // Trigger real lead finding if authenticated
             const formData = new URLSearchParams();
             formData.append('city', cityParam);
+            if (nicheParam) formData.append('niche', nicheParam);
             
             fetch(`${backendUrl}/start_lead_finding`, {
               method: 'POST',
@@ -55,9 +57,13 @@ function DashboardContent() {
               body: formData.toString()
             })
             .then(async res => {
+              if (!res.ok) {
+                // If the backend fails to even start it, trigger demo mode
+                setAutoStartDemo(true);
+                return null;
+              }
               const contentType = res.headers.get('content-type') || '';
-              if (!res.ok || !contentType.includes('application/json')) {
-                // Backend returned an error or HTML page — silently skip, not user-facing
+              if (!contentType.includes('application/json')) {
                 return null;
               }
               return res.json();
@@ -65,7 +71,10 @@ function DashboardContent() {
             .then(data => {
               if (data && data.businesses) setBusinesses(data.businesses);
             })
-            .catch(() => {}); // Startup errors are expected if backend is warming up
+            .catch(() => {
+              // Startup errors are expected if backend is warming up, fallback to demo
+              setAutoStartDemo(true);
+            });
           }
         }
         
@@ -124,6 +133,21 @@ function DashboardContent() {
                 setIsCreditsModalOpen(true);
             }
           }
+        } else if (data.type === 'process_started') {
+          setUpdates(prev => [...prev, {
+            id: `u${Date.now()}_start`,
+            timestamp: new Date().toISOString(),
+            agent_type: 'system',
+            message: `SYSTEM INITIALIZED. OPERATION: ${data.city.toUpperCase()}`
+          }]);
+        } else if (data.type === 'lead_finding_failed' || data.type === 'lead_finding_empty') {
+          setUpdates(prev => [...prev, {
+            id: `u${Date.now()}_err`,
+            timestamp: new Date().toISOString(),
+            agent_type: 'system',
+            message: data.error || data.message || `Lead Finder failed. Switching to mock data...`
+          }]);
+          setAutoStartDemo(true);
         }
       } catch (err) {
         console.error("Failed to parse websocket message", err);
@@ -132,6 +156,18 @@ function DashboardContent() {
     return () => ws.close();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // Run only once — never reconnect on state changes
+
+  useEffect(() => {
+    if (autoStartDemo) {
+      // Small delay to ensure state settles before starting demo
+      const timer = setTimeout(() => {
+        handleRunDemo();
+        setAutoStartDemo(false);
+      }, 500);
+      return () => clearTimeout(timer);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoStartDemo]);
 
   // The actual Demo Simulation Runner
   const handleRunDemo = async () => {
