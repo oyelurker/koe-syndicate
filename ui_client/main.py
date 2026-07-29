@@ -461,8 +461,9 @@ async def auth_google_callback(code: str, state: str = ""):
             key="koe_session",
             value=signed_session_id,
             httponly=True,
+            secure=True,
             max_age=30 * 24 * 60 * 60, # 30 days
-            samesite="lax"
+            samesite="none"
         )
         return response
         
