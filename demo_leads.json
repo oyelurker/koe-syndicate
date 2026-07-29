@@ -1,0 +1,37 @@
+[
+  {
+    "name": "Acme Software Solutions",
+    "city": "San Francisco",
+    "rating": "4.8",
+    "industry": "Technology",
+    "status": "contacted"
+  },
+  {
+    "name": "Golden Gate Marketing",
+    "city": "San Francisco",
+    "rating": "4.2",
+    "industry": "Marketing",
+    "status": "pending"
+  },
+  {
+    "name": "TechFlow Systems",
+    "city": "Austin",
+    "rating": "4.9",
+    "industry": "Technology",
+    "status": "converted"
+  },
+  {
+    "name": "Lone Star Logistics",
+    "city": "Austin",
+    "rating": "3.8",
+    "industry": "Logistics",
+    "status": "contacted"
+  },
+  {
+    "name": "Bay Area Builders",
+    "city": "San Francisco",
+    "rating": "4.5",
+    "industry": "Construction",
+    "status": "pending"
+  }
+]

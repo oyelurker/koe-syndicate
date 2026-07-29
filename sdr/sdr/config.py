@@ -39,7 +39,7 @@ GOOGLE_CLOUD_CLIENT_SECRET = os.getenv("GOOGLE_CLOUD_CLIENT_SECRET", "")
 
 # Gmail Service Account Configuration (New - No manual auth required)
 # For local development
-SERVICE_ACCOUNT_FILE = os.getenv("SERVICE_ACCOUNT_FILE", ".secrets/sales-automation-service.json")
+SERVICE_ACCOUNT_FILE = os.getenv("SERVICE_ACCOUNT_FILE", ".secrets/koe-syndicate-service.json")
 # For cloud deployment, set GOOGLE_APPLICATION_CREDENTIALS environment variable
 # or use Cloud Run service account (no file needed)
 SALES_EMAIL = os.getenv("SALES_EMAIL", "sales@zemzen.org")  # Email to send from

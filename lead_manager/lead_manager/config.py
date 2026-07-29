@@ -22,7 +22,7 @@ TABLE_ID = os.getenv("TABLE_ID", "hot_leads")
 MEETING_TABLE_ID = os.getenv("MEETING_TABLE_ID", "meetings_arranged")
 
 # Gmail Service Account Configuration
-SERVICE_ACCOUNT_FILE = os.getenv("SERVICE_ACCOUNT_FILE", ".secrets/sales-automation-service.json")
+SERVICE_ACCOUNT_FILE = os.getenv("SERVICE_ACCOUNT_FILE", ".secrets/koe-syndicate-service.json")
 SALES_EMAIL = os.getenv("SALES_EMAIL", "sales@zemzen.org")
 GMAIL_SCOPES = [
     'https://www.googleapis.com/auth/gmail.readonly',

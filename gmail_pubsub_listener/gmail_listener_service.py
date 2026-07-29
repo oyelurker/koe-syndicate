@@ -27,7 +27,7 @@ import common.config as config
 PROJECT_ID = os.getenv("PROJECT_ID")
 SUBSCRIPTION_NAME = os.getenv("SUBSCRIPTION_NAME", "gmail-notifications-pull")
 SALES_EMAIL = os.getenv("SALES_EMAIL")
-SERVICE_ACCOUNT_FILE = os.getenv("SERVICE_ACCOUNT_FILE", ".secrets/sales-automation-service.json")
+SERVICE_ACCOUNT_FILE = os.getenv("SERVICE_ACCOUNT_FILE", ".secrets/koe-syndicate-service.json")
 LEAD_MANAGER_URL = os.getenv("LEAD_MANAGER_URL", config.DEFAULT_LEAD_MANAGER_URL).rstrip("/")
 CRON_INTERVAL = 30  # seconds
 
