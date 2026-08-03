@@ -16,25 +16,25 @@ const leftIntegrations: IntegrationItem[] = [
     id: "gcp",
     name: "Google Cloud",
     description: "Enterprise infrastructure",
-    icon: "https://cdn.jiro.build/Amox/All%20Images/Plaid-icon-01.png",
+    icon: "https://www.vectorlogo.zone/logos/google_cloud/google_cloud-icon.svg",
   },
   {
     id: "bigquery",
     name: "BigQuery",
     description: "Data warehousing",
-    icon: "https://cdn.jiro.build/Amox/All%20Images/Stripe-icon-02.png",
+    icon: "https://www.vectorlogo.zone/logos/google_bigquery/google_bigquery-icon.svg",
   },
   {
     id: "rapids",
     name: "NVIDIA RAPIDS",
     description: "GPU data processing",
-    icon: "https://cdn.jiro.build/Amox/All%20Images/PayPal-icon-03.png",
+    icon: "https://www.vectorlogo.zone/logos/nvidia/nvidia-icon.svg",
   },
   {
     id: "gemini",
     name: "Gemini 2.0",
     description: "Advanced LLM reasoning",
-    icon: "https://cdn.jiro.build/Amox/All%20Images/Visa-icon-04.png",
+    icon: "https://upload.wikimedia.org/wikipedia/commons/8/8a/Google_Gemini_logo.svg",
   },
 ];
 
@@ -43,25 +43,25 @@ const rightIntegrations: IntegrationItem[] = [
     id: "salesforce",
     name: "Salesforce",
     description: "Sync leads & accounts",
-    icon: "https://cdn.jiro.build/Amox/All%20Images/Mastercard-icon-05.png",
+    icon: "https://www.vectorlogo.zone/logos/salesforce/salesforce-icon.svg",
   },
   {
     id: "hubspot",
     name: "HubSpot",
     description: "Inbound CRM syncing",
-    icon: "https://cdn.jiro.build/Amox/All%20Images/QuickBooks-icon-06.png",
+    icon: "https://www.vectorlogo.zone/logos/hubspot/hubspot-icon.svg",
   },
   {
     id: "slack",
     name: "Slack",
     description: "Real-time deal alerts",
-    icon: "https://cdn.jiro.build/Amox/All%20Images/Xero-icon-07.png",
+    icon: "https://www.vectorlogo.zone/logos/slack/slack-icon.svg",
   },
   {
     id: "gmail",
     name: "Gmail / GSuite",
     description: "Automated outbound",
-    icon: "https://cdn.jiro.build/Amox/All%20Images/Coinbase-icon-08.png",
+    icon: "https://www.vectorlogo.zone/logos/google_gmail/google_gmail-icon.svg",
   },
 ];
 
@@ -272,12 +272,9 @@ export default function Integration01Koe({ className }: { className?: string }) 
                       className="w-full h-full rounded-full bg-white shadow-[0_12px_48px_rgba(19,142,95,0.12)] flex items-center justify-center relative z-10"
                     >
                       <div className="w-[84px] lg:w-[104px] h-[84px] lg:h-[104px] rounded-full bg-[#FAFFFD] flex items-center justify-center">
-                        <img
-                          src="https://cdn.jiro.build/Amox/All%20SVG/only%20loto-%20Koe.svg"
-                          alt="Koe Logo"
-                          className="w-[50px] lg:w-[64px] h-[50px] lg:h-[64px] object-contain opacity-95"
-                          referrerPolicy="no-referrer"
-                        />
+                        <div className="flex items-center justify-center w-[50px] lg:w-[64px] h-[50px] lg:h-[64px] bg-[#138E5F] rounded-full shadow-inner">
+                          <span className="font-onest font-bold text-white text-xl lg:text-3xl tracking-tighter">K</span>
+                        </div>
                       </div>
                     </motion.div>
                   </div>
