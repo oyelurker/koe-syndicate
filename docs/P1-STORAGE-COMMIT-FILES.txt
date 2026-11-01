@@ -1,0 +1,16 @@
+.dockerignore
+.gcloudignore
+.github/workflows/ci.yml
+.gitignore
+docs/FIX-CHECKLIST.md
+docs/P1-STORAGE-COMMIT-FILES.txt
+docs/P1-STORAGE.md
+docs/P1-VERIFICATION.md
+docs/p1-hosted-ci.json
+scripts/backup_local_data.py
+tests/offline/test_storage.py
+tests/security/test_p0.py
+ui_client/db.py
+ui_client/main.py
+ui_client/store.py
+ui_client/test/test_ui_client.py

@@ -1,16 +1,20 @@
 import aiosqlite
+import asyncio
 import json
 import os
 from pathlib import Path
 from typing import Optional
 from google.oauth2.credentials import Credentials
 from .token_crypto import encrypt, decrypt, cipher, PREFIX
+from .store import Store, tenant_id, now
 
 DB_PATH = Path(os.getenv("DB_PATH", "tokens.db"))
 
 async def init_db():
     """Initializes the database schema."""
     cipher()  # Fail before touching stored credentials if key configuration is invalid.
+    await asyncio.to_thread(Store(DB_PATH).check_version)
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("""
             CREATE TABLE IF NOT EXISTS users (
@@ -44,11 +48,13 @@ async def init_db():
             values = [v if v is None or v.startswith(PREFIX) else encrypt(v) for v in row[1:]]
             await db.execute("UPDATE users SET access_token=?, refresh_token=?, client_secret=? WHERE id=?", (*values, row[0]))
         await db.commit()
+    await asyncio.to_thread(Store(DB_PATH).initialize)
 
 async def upsert_user(user_info, credentials) -> str:
     """Inserts or updates a user and returns their ID."""
-    user_id = user_info.get("id") or str(hash(user_info.get("email")))
-    email = user_info.get("email")
+    email = (user_info.get("email") or "").strip().lower()
+    identity = tenant_id(email)
+    user_id = user_info.get("id") or "local-" + identity
     name = user_info.get("name")
     picture = user_info.get("picture")
     
@@ -80,7 +86,11 @@ async def upsert_user(user_info, credentials) -> str:
         async with db.execute("SELECT id FROM users WHERE email = ?", (email,)) as cursor:
             row = await cursor.fetchone()
             actual_user_id = row[0]
-            
+        await db.execute("INSERT OR IGNORE INTO tenants VALUES (?,?,?)", (identity, email, now()))
+        await db.execute("""INSERT INTO integration_connections VALUES (?, 'google', ?, 1, 1, ?)
+            ON CONFLICT(tenant_id,provider) DO UPDATE SET user_id=excluded.user_id,connected=1,
+            generation=integration_connections.generation + CASE WHEN integration_connections.connected=0 THEN 1 ELSE 0 END,
+            updated_at=excluded.updated_at""", (identity, actual_user_id, now()))
         await db.commit()
         return actual_user_id
 
@@ -155,6 +165,12 @@ async def delete_session(session_id: str):
 
 async def disconnect_user(user_id: str):
     async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("SELECT email FROM users WHERE id=?", (user_id,)) as cursor:
+            row = await cursor.fetchone()
+        if row:
+            identity = tenant_id(row[0])
+            await db.execute("UPDATE integration_connections SET connected=0,user_id=NULL,generation=generation+1,updated_at=? WHERE tenant_id=? AND provider='google'", (now(), identity))
+            await db.execute("UPDATE jobs SET state='cancelled',updated_at=? WHERE tenant_id=? AND provider='google' AND state IN ('queued','running')", (now(), identity))
         await db.execute("DELETE FROM sessions WHERE user_id = ?", (user_id,))
         await db.execute("DELETE FROM users WHERE id = ?", (user_id,))
         await db.commit()

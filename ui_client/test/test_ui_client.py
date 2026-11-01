@@ -26,7 +26,7 @@ from common.security import Execution, ServiceAuth
 from ui_client import db, security
 from a2a.types import Task, TaskStatus, TaskState, SendMessageResponse, SendMessageSuccessResponse, JSONRPCError, JSONRPCErrorResponse
 
-from ui_client.main import app, app_state, manager, Business, BusinessStatus, AgentType, AgentUpdate
+from ui_client.main import app, app_state, manager, ConnectionManager, Business, BusinessStatus, AgentType, AgentUpdate
 
 
 def signed_callback(client, payload):
@@ -216,6 +216,10 @@ class TestUIClient:
 
 class TestWebSocketManager:
     """Test WebSocket functionality."""
+
+    @pytest.fixture
+    def connection_manager(self):
+        return ConnectionManager()
     
     @pytest.fixture
     def mock_websocket(self):
@@ -226,48 +230,48 @@ class TestWebSocketManager:
         return mock_ws
     
     @pytest.mark.asyncio
-    async def test_websocket_connect(self, mock_websocket):
+    async def test_websocket_connect(self, connection_manager, mock_websocket):
         """Test WebSocket connection."""
-        await manager.connect(mock_websocket)
+        await connection_manager.connect(mock_websocket)
         
         mock_websocket.accept.assert_called_once()
-        assert mock_websocket in manager.active_connections
+        assert mock_websocket in connection_manager.active_connections
     
-    def test_websocket_disconnect(self, mock_websocket):
+    def test_websocket_disconnect(self, connection_manager, mock_websocket):
         """Test WebSocket disconnection."""
-        manager.active_connections.add(mock_websocket)
-        manager.disconnect(mock_websocket)
+        connection_manager.active_connections.add(mock_websocket)
+        connection_manager.disconnect(mock_websocket)
         
-        assert mock_websocket not in manager.active_connections
+        assert mock_websocket not in connection_manager.active_connections
     
     @pytest.mark.asyncio
-    async def test_send_update_no_connections(self):
+    async def test_send_update_no_connections(self, connection_manager):
         """Test sending update with no active connections."""
-        manager.active_connections.clear()
+        connection_manager.active_connections.clear()
         
         # Should not raise an exception
-        await manager.send_update({"type": "test", "data": "test"})
+        await connection_manager.send_update({"type": "test", "data": "test"})
     
     @pytest.mark.asyncio
-    async def test_send_update_with_connections(self, mock_websocket):
+    async def test_send_update_with_connections(self, connection_manager, mock_websocket):
         """Test sending update to active connections."""
-        manager.active_connections.add(mock_websocket)
+        connection_manager.active_connections.add(mock_websocket)
         
         test_data = {"type": "test", "message": "hello"}
-        await manager.send_update(test_data)
+        await connection_manager.send_update(test_data)
         
         mock_websocket.send_text.assert_called_once_with(json.dumps(test_data))
     
     @pytest.mark.asyncio
-    async def test_send_update_connection_error(self, mock_websocket):
+    async def test_send_update_connection_error(self, connection_manager, mock_websocket):
         """Test handling connection errors during update."""
         mock_websocket.send_text.side_effect = Exception("Connection error")
-        manager.active_connections.add(mock_websocket)
+        connection_manager.active_connections.add(mock_websocket)
         
         # Should handle the error gracefully and remove the connection
-        await manager.send_update({"type": "test"})
+        await connection_manager.send_update({"type": "test"})
         
-        assert mock_websocket not in manager.active_connections
+        assert mock_websocket not in connection_manager.active_connections
 
 class TestBusinessModels:
     """Test business data models."""

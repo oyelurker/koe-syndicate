@@ -160,27 +160,65 @@ class HumanInputResponse(BaseModel):
     request_id: str
     response: str
 
-# Global application state
-app_state = {
-    "is_running": False,
-    "current_city": None,
-    "businesses": {},  # dict[str, Business]
-    "agent_updates": [],  # List[AgentUpdate]
-    "websocket_connections": set(),  # Set[WebSocket]
-    "session_id": None,
-    "human_input_requests": {},  # dict[str, HumanInputRequest]
-    "lead_scores": {},  # dict[str, float] — NVIDIA RAPIDS scores keyed by business name
-}
+# Local runtime cache. Durable records remain scoped by their explicit owner.
+def empty_pipeline_state():
+    return {
+        "is_running": False,
+        "current_city": None,
+        "businesses": {},
+        "agent_updates": [],
+        "websocket_connections": set(),
+        "session_id": None,
+        "human_input_requests": {},
+        "lead_scores": {},
+    }
+
+
+app_state = empty_pipeline_state()
 
 # Session Signer
 from common.security import ServiceAuth, SecurityError, require_action, mode
 from .security import BrowserSecurityMiddleware, validate_config
+from .store import Store
+from . import db as token_db
+from common.security import execution, owner_email
+
+pipeline_store: Store | None = None
+
+
+def pipeline_snapshot():
+    def encode(value):
+        if isinstance(value, BaseModel):
+            return value.model_dump(mode="json")
+        if isinstance(value, datetime):
+            return value.isoformat()
+        if isinstance(value, Enum):
+            return value.value
+        raise TypeError("Pipeline state must be JSON serializable")
+    return json.loads(json.dumps({k: v for k, v in app_state.items() if k != "websocket_connections"}, default=encode))
+
+
+def restore_pipeline(snapshot):
+    app_state.update(snapshot)
+    app_state["businesses"] = {key: Business.model_validate(value) for key, value in snapshot.get("businesses", {}).items()}
+    app_state["agent_updates"] = [AgentUpdate.model_validate(value) for value in snapshot.get("agent_updates", [])]
+    app_state["human_input_requests"] = {key: HumanInputRequest.model_validate(value) for key, value in snapshot.get("human_input_requests", {}).items()}
+
+
+async def persist_pipeline(event):
+    context = execution.get()
+    if context is None:
+        raise SecurityError("Missing owner for persistent pipeline update")
+    if pipeline_store is None:
+        raise RuntimeError("Persistent storage has not completed application startup")
+    await asyncio.to_thread(pipeline_store.save, context.owner, pipeline_snapshot(), json.loads(json.dumps(event, default=str)))
 
 class ConnectionManager:
     """Manages WebSocket connections for real-time updates."""
     
-    def __init__(self):
+    def __init__(self, persist=None):
         self.active_connections: Set[WebSocket] = set()
+        self.persist = persist
     
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
@@ -193,6 +231,8 @@ class ConnectionManager:
     
     async def send_update(self, data: dict[str, Any]):
         """Send update to all connected clients."""
+        if self.persist is not None:
+            await self.persist(data)
         if not self.active_connections:
             return
         
@@ -210,20 +250,29 @@ class ConnectionManager:
         for connection in disconnected:
             self.disconnect(connection)
 
-manager = ConnectionManager()
+manager = ConnectionManager(persist=persist_pipeline)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Handles application startup and shutdown events."""
+    global pipeline_store
     validate_config()
     logger.info("UI Client starting up...")
     
     # Initialize SQLite database
     await db.init_db()
+    store = Store(token_db.DB_PATH)
+    app_state.clear()
+    app_state.update(empty_pipeline_state())
+    await asyncio.to_thread(store.interrupt_incomplete, owner_email())
+    restored = await asyncio.to_thread(store.load, owner_email())
+    if restored:
+        restore_pipeline(restored)
+    pipeline_store = store
     logger.info("Database initialized successfully.")
 
     # ── NVIDIA RAPIDS: Pre-score demo leads at startup ────────────────────────
-    if RAPIDS_SCORING_AVAILABLE:
+    if RAPIDS_SCORING_AVAILABLE and not app_state["lead_scores"]:
         try:
             _demo_path = Path(__file__).parent.parent / "demo_leads.json"
             if _demo_path.exists():
@@ -235,11 +284,14 @@ async def lifespan(app: FastAPI):
                 logger.warning("[RAPIDS] demo_leads.json not found — scores unavailable until leads are generated.")
         except Exception as _e:
             logger.warning(f"[RAPIDS] Startup scoring failed: {_e}")
-    else:
+    elif not RAPIDS_SCORING_AVAILABLE:
         logger.warning("[RAPIDS] Scoring engine not loaded — /api/lead-scores will return empty.")
 
-    yield
-    logger.info("UI Client shutting down...")
+    try:
+        yield
+    finally:
+        pipeline_store = None
+        logger.info("UI Client shutting down...")
 
 app = FastAPI(lifespan=lifespan, debug=False, docs_url=None, redoc_url=None, openapi_url=None)
 app.add_middleware(BrowserSecurityMiddleware)
