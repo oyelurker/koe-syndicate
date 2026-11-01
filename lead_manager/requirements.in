@@ -9,7 +9,7 @@ google-auth>=2.35
 google-api-python-client
 google-cloud-bigquery
 click>=8.1.8
-google-adk==1.0.0
+google-adk==1.10.0
 pywin32==312 ; sys_platform == "win32"
 a2a-sdk==0.2.5
 deprecated>=1.2.14
