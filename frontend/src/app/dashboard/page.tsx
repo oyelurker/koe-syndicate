@@ -156,7 +156,6 @@ function DashboardContent() {
       }
     };
     return () => ws.close();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // Run only once — never reconnect on state changes
 
   useEffect(() => {
@@ -245,7 +244,6 @@ function DashboardContent() {
     setShowDemo(true);
     setIsDemoRunning(true);
 
-    const b4name = businesses[3]?.name || targetBusiness.name;
     const b5name = targetBusiness.name;
     const b8name = businesses[7]?.name || businesses[1]?.name || targetBusiness.name;
     const b9name = businesses[8]?.name || businesses[0]?.name || targetBusiness.name;
@@ -392,7 +390,6 @@ function DashboardContent() {
     <div className="flex h-screen bg-[#f8f9fa] text-[#042718] overflow-hidden font-inter">
       <Sidebar 
         businesses={businesses}
-        onTriggerLeadManager={handleRunDemo}
         onReset={handleReset}
         onRunDemo={handleRunDemo}
         isDemoRunning={isDemoRunning}

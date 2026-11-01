@@ -1,0 +1,21 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      frontend-compatible:
+        patterns: ['*']
+        update-types: [minor, patch]
+  - package-ecosystem: pip
+    directories: [/, /ui_client, /lead_finder, /lead_manager, /sdr, /gmail_pubsub_listener]
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5

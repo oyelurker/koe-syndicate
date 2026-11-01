@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import type { Variants } from "framer-motion";
+import Image from "next/image";
 import {
   Sparkles,
   ArrowUpRight,
@@ -94,9 +94,6 @@ export default function KoeOriginal4step({ className }: { className?: string }) 
 
   return (
     <>
-      <link rel="preconnect" href="https://fonts.googleapis.com" />
-      <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-      <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Onest:wght@400;500;600;700&family=Playfair+Display:ital,wght@1,600&display=swap" rel="stylesheet" crossOrigin="anonymous" />
 
       <section className={"w-full bg-[#F6FDFF] py-20 lg:py-32 overflow-hidden " + (className || "")}>
         <div className="w-full max-w-[1248px] mx-auto relative px-4 md:px-6">
@@ -287,7 +284,10 @@ export default function KoeOriginal4step({ className }: { className?: string }) 
                         transition={{ duration: 0.5 }}
                         className="relative z-10 w-full flex items-center justify-center p-6 lg:p-0"
                       >
-                        <img
+                        <Image
+                          width={384}
+                          height={384}
+                          unoptimized
                           src={activeStep.imgSrc}
                           alt={activeStep.heading}
                           className="w-full max-w-[384px] h-auto object-contain drop-shadow-2xl"

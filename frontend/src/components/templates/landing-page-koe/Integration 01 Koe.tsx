@@ -1,4 +1,5 @@
 "use client";
+import Image from "next/image";
 
 import React, { useState, useEffect } from "react";
 import { motion } from "framer-motion";
@@ -89,9 +90,6 @@ export default function Integration01Koe({ className }: { className?: string }) 
 
   return (
     <>
-      <link rel="preconnect" href="https://fonts.googleapis.com" />
-      <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-      <link href="https://fonts.googleapis.com/css2?family=Onest:wght@400;500;600;700&display=swap" rel="stylesheet" crossOrigin="anonymous" />
 
       <section className={"w-full bg-[#F4FAFB] py-16 md:py-[100px] overflow-hidden relative flex justify-center " + (className || "")}>
         <div className="w-full max-w-[1440px] px-6 lg:px-[96px]">
@@ -244,7 +242,7 @@ export default function Integration01Koe({ className }: { className?: string }) 
                       style={{ top: isLargeScreen ? topValues[idx] : undefined }}
                     >
                       <div className="w-[48px] h-[48px] flex items-center justify-center shrink-0 group-hover:scale-110 transition-transform">
-                        <img src={item.icon} alt={item.name} className="w-full h-full object-contain" referrerPolicy="no-referrer" />
+                        <Image width={48} height={48} unoptimized src={item.icon} alt={item.name} className="w-full h-full object-contain" referrerPolicy="no-referrer" />
                       </div>
                       <div className="flex flex-col">
                         <span className="text-[#042718] font-semibold text-[14px] lg:text-[16px] leading-tight">{item.name}</span>
@@ -293,7 +291,7 @@ export default function Integration01Koe({ className }: { className?: string }) 
                       style={{ top: isLargeScreen ? topValues[idx] : undefined }}
                     >
                       <div className="w-[48px] h-[48px] flex items-center justify-center shrink-0 group-hover:scale-110 transition-transform">
-                        <img src={item.icon} alt={item.name} className="w-full h-full object-contain" referrerPolicy="no-referrer" />
+                        <Image width={48} height={48} unoptimized src={item.icon} alt={item.name} className="w-full h-full object-contain" referrerPolicy="no-referrer" />
                       </div>
                       <div className="flex flex-col">
                         <span className="text-[#042718] font-semibold text-[14px] lg:text-[16px] leading-tight">{item.name}</span>

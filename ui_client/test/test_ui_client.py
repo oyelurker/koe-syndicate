@@ -9,8 +9,8 @@ This module contains comprehensive tests for the UI Client including:
 - Error handling
 
 Run tests with:
-    pytest tests/test_ui_client.py -v
-    pytest tests/test_ui_client.py::test_health_check -v
+    python -m pytest ui_client/test/test_ui_client.py -v
+    python -m pytest ui_client/test/test_ui_client.py::TestUIClient::test_health_check -v
 """
 
 import json
@@ -20,39 +20,36 @@ from datetime import datetime
 from unittest.mock import AsyncMock, Mock, patch
 from fastapi.testclient import TestClient
 from fastapi.websockets import WebSocket
-
-# Import the application
-import sys
-import os
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import httpx
+from google.oauth2.credentials import Credentials
+from common.security import Execution, ServiceAuth
+from ui_client import db, security
+from a2a.types import Task, TaskStatus, TaskState, SendMessageResponse, SendMessageSuccessResponse, JSONRPCError, JSONRPCErrorResponse
 
 from ui_client.main import app, app_state, manager, Business, BusinessStatus, AgentType, AgentUpdate
+
+
+def signed_callback(client, payload):
+    request = httpx.Request("POST", "http://localhost:8000/agent_callback", json=payload)
+    signed = next(ServiceAuth("sdr", "ui-client", Execution("owner@example.test", "demo")).auth_flow(request))
+    return client.post(request.url.path, content=request.content, headers=dict(signed.headers))
 
 class TestUIClient:
     """Test class for UI Client functionality."""
     
     @pytest.fixture
     def client(self):
-        """Create a test client."""
-        return TestClient(app)
-    
-    @pytest.fixture
-    def reset_app_state(self):
-        """Reset application state before each test."""
-        app_state["is_running"] = False
-        app_state["current_city"] = None
-        app_state["businesses"] = {}
-        app_state["agent_updates"] = []
-        app_state["session_id"] = None
-        manager.active_connections.clear()
-        yield
-        # Cleanup after test
-        app_state["is_running"] = False
-        app_state["current_city"] = None
-        app_state["businesses"] = {}
-        app_state["agent_updates"] = []
-        app_state["session_id"] = None
-        manager.active_connections.clear()
+        """Use real session and CSRF validation against temporary storage."""
+        with TestClient(app, base_url="http://localhost:8000", follow_redirects=False) as caller:
+            async def seed():
+                uid = await db.upsert_user({"id": "owner", "email": "owner@example.test"},
+                    Credentials(token="test-token", refresh_token="test-refresh", token_uri="https://oauth2.googleapis.com/token",
+                                client_id="test", client_secret="test", scopes=[]))
+                await db.create_session("ui-test-session", uid)
+            asyncio.run(seed())
+            caller.cookies.set("koe_session", security.signer().dumps("ui-test-session"))
+            caller.headers.update({"Origin": "http://localhost:3000", "X-Koe-CSRF": security.csrf_token("ui-test-session")})
+            yield caller
     
     def test_health_check(self, client, reset_app_state):
         """Test the health check endpoint."""
@@ -63,16 +60,13 @@ class TestUIClient:
         assert data["status"] == "healthy"
         assert data["service"] == "ui_client"
         assert "timestamp" in data
-        assert "active_connections" in data
-        assert data["is_running"] is False
-        assert data["business_count"] == 0
+        assert not {"active_connections", "is_running", "business_count"} & data.keys()
     
     def test_root_endpoint_initial_state(self, client, reset_app_state):
-        """Test root endpoint returns input form when no data."""
+        """The authenticated legacy root redirects to the frontend."""
         response = client.get("/")
-        assert response.status_code == 200
-        assert b"Start Lead Generation" in response.content
-        assert b"Target City" in response.content
+        assert response.status_code == 303
+        assert response.headers["location"] == "http://localhost:3000/dashboard"
     
     def test_root_endpoint_with_data(self, client, reset_app_state):
         """Test root endpoint returns dashboard when data exists."""
@@ -86,9 +80,8 @@ class TestUIClient:
         app_state["current_city"] = "San Francisco"
         
         response = client.get("/")
-        assert response.status_code == 200
-        assert b"dashboard" in response.content.lower()
-        assert b"Test Company" in response.content
+        assert response.status_code == 303
+        assert response.headers["location"] == "http://localhost:3000/dashboard"
     
     def test_start_lead_finding_valid_input(self, client, reset_app_state):
         """Test starting lead finding with valid city input."""
@@ -102,7 +95,7 @@ class TestUIClient:
     
     def test_start_lead_finding_empty_city(self, client, reset_app_state):
         """Test starting lead finding with empty city input."""
-        response = client.post("/start_lead_finding", data={"city": ""})
+        response = client.post("/start_lead_finding", data={"city": "   "})
         assert response.status_code == 400
         assert app_state["is_running"] is False
     
@@ -134,7 +127,7 @@ class TestUIClient:
         }
         
         with patch.object(manager, "send_update") as mock_send:
-            response = client.post("/agent_callback", json=update_data)
+            response = signed_callback(client, update_data)
             assert response.status_code == 200
             data = response.json()
             assert data["status"] == "success"
@@ -157,11 +150,11 @@ class TestUIClient:
             "timestamp": datetime.now().isoformat()
         }
         
-        response = client.post("/agent_callback", json=update_data)
-        assert response.status_code == 200
+        response = signed_callback(client, update_data)
+        assert response.status_code == 400
         data = response.json()
         assert data["status"] == "error"
-        assert "not found" in data["message"]
+        assert "missing name" in data["message"]
     
     def test_api_businesses_empty(self, client, reset_app_state):
         """Test businesses API endpoint with no businesses."""
@@ -317,8 +310,9 @@ class TestA2AIntegration:
     """Test A2A integration functionality."""
     
     @pytest.mark.asyncio
-    async def test_call_lead_finder_agent_success(self):
-        """Test successful A2A call to Lead Finder agent."""
+    @pytest.mark.parametrize("state,success", [(TaskState.completed, True), (TaskState.failed, False)])
+    async def test_call_lead_finder_task_response(self, state, success):
+        """Exercise the real SDK response union, including empty successful results."""
         with patch("ui_client.main.httpx.AsyncClient") as mock_client_class:
             # Mock the HTTP client and A2A client
             mock_http_client = AsyncMock()
@@ -328,25 +322,38 @@ class TestA2AIntegration:
                 mock_a2a_client = AsyncMock()
                 mock_a2a_client_class.return_value = mock_a2a_client
                 
-                # Mock successful response
-                mock_response = Mock()
-                mock_response.root = Mock()
-                mock_response.root.result = Mock()
-                mock_response.root.result.id = "test-task-id"
-                mock_response.root.result.status.state = "completed"
-                mock_response.root.result.artifacts = []
+                mock_response = SendMessageResponse(root=SendMessageSuccessResponse(id="request", result=Task(
+                    id="task", contextId="campaign", status=TaskStatus(state=state), artifacts=[])))
                 
                 mock_a2a_client.send_message.return_value = mock_response
                 
-                from ui_client.main import call_lead_finder_agent
+                from ui_client.main import call_lead_finder_agent_a2a
                 
-                result = await call_lead_finder_agent("San Francisco", "test-session")
+                result = await call_lead_finder_agent_a2a("San Francisco", "test-session", niche="cafes")
                 
                 # Verify the call was made
-                mock_a2a_client.send_message.assert_called_once()
+                mock_a2a_client.send_message.assert_awaited_once()
+                request = mock_a2a_client.send_message.call_args.args[0]
+                assert request.params.message.parts[0].root.data == {"city": "San Francisco", "niche": "cafes"}
                 
-                # Since we mocked no artifacts, it should indicate no results
-                assert result["success"] is False or "error" in result
+                assert result["success"] is success
+                assert result["businesses"] == []
+                assert (result["error"] is None) is success
+
+    @pytest.mark.asyncio
+    async def test_call_lead_finder_rpc_error(self):
+        with patch("ui_client.main.httpx.AsyncClient") as client_class:
+            client_class.return_value.__aenter__.return_value = AsyncMock()
+            with patch("ui_client.main.A2AClient") as a2a_class:
+                a2a = AsyncMock()
+                a2a.send_message.return_value = SendMessageResponse(root=JSONRPCErrorResponse(
+                    id="request", error=JSONRPCError(code=-32603, message="Provider unavailable")))
+                a2a_class.return_value = a2a
+                from ui_client.main import call_lead_finder_agent_a2a
+                result = await call_lead_finder_agent_a2a("San Francisco", "test-session")
+                assert result["success"] is False
+                assert result["businesses"] == []
+                assert "Provider unavailable" in result["error"]
 
 if __name__ == "__main__":
     # Run tests if script is executed directly

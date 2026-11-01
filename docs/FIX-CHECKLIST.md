@@ -1,4 +1,4 @@
-# KOE Syndicate â€” ordered fix checklist
+# KOE Syndicate — ordered fix checklist
 
 Created: 31 October 2026. Based on [the audit](AUDIT-2026-10-30.md), baseline commit `860a7f6`.
 
@@ -6,7 +6,7 @@ This file is the implementation tracker. Execute remaining items in numbered ord
 
 For each item: reproduce or define the failure, implement a focused change, run relevant checks, record evidence, then mark complete. Keep external providers mocked for routine tests. Completion of source changes does not establish deployment completion: record both when applicable. Do not weaken assertions or suppress checks simply to make the suite pass.
 
-## Phase A â€” P0: contain exposure and remove immediate security risks
+## Phase A — P0: contain exposure and remove immediate security risks
 
 **Completion scope, agreed 1 November 2026:** local single-owner operation with persistent local storage and live actions disabled, plus IAM containment of the old cloud deployment. The owner requested that billing remain unchanged and cloud redeployment be deferred. Phase A checkboxes record source/local verification and the containment checks; they do not certify a new cloud revision, Linux containers, real-provider operation or multi-user readiness. See `P0-VERIFICATION.md`. Cloud IAM transport, shared storage, ingress changes and deployment validation remain item 22 before cloud reactivation.
 
@@ -23,13 +23,15 @@ For each item: reproduce or define the failure, implement a focused change, run 
 
 Phase gate: remain in restricted operation until Phase C establishes durable tenant isolation. Authentication by itself does not make the shared pipeline safe for multiple users.
 
-## Phase B â€” P1: establish trustworthy verification
+## Phase B — P1: establish trustworthy verification
 
-- [ ] **11. Repair the backend test baseline.** Align tests with intended contracts, handle redirect assertions explicitly, fix pytest configuration and separate offline tests from provider integration scripts. Add regression tests for items 01â€“10. **Done when:** the offline suite passes without contacting providers and includes anonymous, cross-owner, CSRF, callback-auth and demo-write denial cases.
-- [ ] **12. Clear frontend lint failures and actionable warnings.** Fix hook ordering/dependencies, navigation and other reported errors; review warnings rather than blanket-disabling rules. **Done when:** lint, type checking and production build pass; any deferred warnings are individually explained.
+- [x] **11. Repair the backend test baseline.** Align tests with intended contracts, handle redirect assertions explicitly, fix pytest configuration and separate offline tests from provider integration scripts. Add regression tests for items 01–10. **Done when:** the offline suite passes without contacting providers and includes anonymous, cross-owner, CSRF, callback-auth and demo-write denial cases.
+- [x] **12. Clear frontend lint failures and actionable warnings.** Fix hook ordering/dependencies, navigation and other reported errors; review warnings rather than blanket-disabling rules. **Done when:** lint, type checking and production build pass; any deferred warnings are individually explained.
 - [ ] **13. Add continuous integration gates.** Run offline backend tests, frontend lint/build, dependency audits and secret scanning; add dependency update automation and document required checks. **Done when:** a real CI run passes and a deliberately failing test blocks the relevant check. Configure repository merge protection if repository permissions permit; otherwise record that separately.
 
-## Phase C â€” P1: establish ownership, durability and safe execution
+**Checkpoint, 1 November 2026:** item 11 passes 80 offline tests with isolated state and blocked provider sockets. Item 12 passes lint with zero warnings, TypeScript and production build. Item 13 has locally validated workflow/Dependabot/secret-check source; a real hosted CI run and required-merge-check verification await the owner commit and push. GitHub admin permission is available; branch protection remains unchanged until the first green run. See `P1-VERIFICATION.md` and `P1-COMMIT-FILES.txt`. Items 14–22 remain pending.
+
+## Phase C — P1: establish ownership, durability and safe execution
 
 - [ ] **14. Introduce durable tenant-owned storage.** Add migrations for users/tenants, campaigns, leads, jobs, events and integration connections; persist encrypted OAuth refresh tokens; define disconnect/revocation and retention behavior. **Done when:** restart preserves records, migration/restore tests pass, and a disconnected integration cannot be used by later jobs.
 - [ ] **15. Isolate all data and events by owner.** Replace shared global pipeline state and shared agent identities; scope queries, callbacks, sockets and resets to tenant/campaign; reject stale or unrelated run events. **Done when:** two-user tests prove neither user can read, reset, subscribe to or execute the other's workflow, including across replicas.
@@ -37,23 +39,23 @@ Phase gate: remain in restricted operation until Phase C establishes durable ten
 - [ ] **17. Add outreach and agent action policies.** Enforce per-owner rate/spend limits, concurrency bounds, approved recipients/actions, suppression/opt-out rules, contact windows and auditable approval decisions in tools. **Done when:** limits, suppressed contacts and unauthorized model-generated actions are rejected even if UI or prompt instructions are bypassed.
 - [ ] **18. Repair phone execution.** Remove blocking sleeps/SDK calls from the event loop, add total deadlines and cancellation, normalize supported phone formats, and report provider errors accurately. **Done when:** a stalled provider times out without freezing other requests; retries cannot place duplicate calls; unsupported destinations are rejected clearly.
 
-Phase gate: do not enable real multi-user outreach until items 01â€“18 have evidence of completion, including deployment checks applicable to the selected hosting environment.
+Phase gate: do not enable real multi-user outreach until items 01–18 have evidence of completion, including deployment checks applicable to the selected hosting environment.
 
-## Phase D â€” P1: repair the end-to-end integrations
+## Phase D — P1: repair the end-to-end integrations
 
 - [ ] **19. Repair Gmail ingestion.** Use the correct streaming subscription API, propagate startup failures, use the actual Lead Manager contract, persist history cursors and message IDs, handle pagination/expired cursors, and acknowledge only after durable acceptance. **Done when:** startup failure activates fallback, duplicate notifications do not duplicate work, and failed delivery is retried rather than silently acknowledged.
 - [ ] **20. Correct Calendar availability and booking.** Clip slots to the requested future interval, handle timezones/DST, fetch complete busy information, recheck conflicts, and support owner-scoped idempotent booking. **Done when:** past slots, overlapping bookings and duplicate events are rejected; failed booking remains failed in the UI.
 - [ ] **21. Implement truthful meeting persistence.** Write meeting records to BigQuery or the designated durable store; report degraded/local-only storage accurately and retry recoverably. **Done when:** persisted success corresponds to a retrievable record, and storage outages cannot produce a false success message.
 - [ ] **22. Complete deployment configuration.** Select and document the supported topology; include Gmail listener/scoring assets, durable storage, service URLs, OAuth callbacks, frontend origin and secure WebSocket configuration; validate required settings on startup. **Done when:** clean container builds and a staging deployment pass authenticated service-contract checks without hardcoded localhost dependencies.
 
-## Phase E â€” P2: make the dashboard dependable and honest
+## Phase E — P2: make the dashboard dependable and honest
 
 - [ ] **23. Repair realtime and reset behavior.** Add reconnect/backoff, snapshot/event recovery, explicit campaign states, backend cancellation/reset and timer cleanup. **Done when:** refresh/network loss recovers correct state, reset cannot be undone by old timers/events, and anonymous demo results remain visible after completion.
 - [ ] **24. Implement the human-approval UI.** Display pending requests, authorized approval/rejection, expiry and delivery state; retain failed submissions for retry. **Done when:** an approval travels from the correct user's UI to the correct job exactly once and cannot be forged by another user.
 - [ ] **25. Fix readiness, errors and operational visibility.** Preserve real error categories, cache provider health checks, distinguish configured/reachable/authorized readiness, and add correlated job logs, metrics and actionable alerts. **Done when:** auth, validation, quota, timeout and provider errors are distinguishable; health checks do not generate uncontrolled paid requests.
 - [ ] **26. Correct scoring and product claims.** Label synthetic scores, report the actual compute engine, carry real feature values and connect score results to lead IDs/UI. Repair placeholder navigation, policy links, branding and feature/agent-count claims. **Done when:** every displayed live claim has an implemented source; synthetic outcomes and scores are visibly identified.
 
-## Phase F â€” P3: add product capabilities after stabilization
+## Phase F — P3: add product capabilities after stabilization
 
 - [ ] **27. Improve lead management.** Add deduplication by stable identifiers, source/provenance, editable profiles, filters and exports. **Done when:** repeated discovery merges the intended lead without overwriting user edits or leaking another tenant's data.
 - [ ] **28. Add a complete activity and meeting lifecycle.** Show real call/email/provider events; support confirmed rescheduling/cancellation and selected CRM synchronization. **Done when:** retry/reconciliation keeps the app and provider state consistent and failures remain visible.
@@ -70,12 +72,12 @@ Append one row when an item is finished. Leave its checkbox unchecked if its acc
 | 02 | Explicit mode propagation and confirmed-booking notifications | Direct call/email/Calendar denials; unconfirmed meetings cannot notify success | Verified locally | Live provider writes intentionally disabled |
 | 03 | `e4486eb` committed by owner | Production build + TypeScript pass; zero high/critical npm findings | Not deployed | 16 moderate lint-toolchain findings; item 12 |
 | 04 | Per-service manifests and locked dependencies | Clean install, pip check, five independent lock-closure checks and service imports; Python audits clear | Verified on Windows/Python 3.12 | Linux containers deferred; engine unavailable |
-| 05â€“06 | OAuth, encrypted tokens, session/CSRF/API/WebSocket boundaries | State/PKCE/login/owner/expiry/revocation tests; real local startup and OAuth initiation | Verified locally | Interactive Google consent before provider enablement |
-| 07â€“08 | Signed services/callbacks and owner-scoped Calendar gateway | Real A2A discovery contracts, replay/caller checks, no default-user or raw-token endpoint | Local topology verified | Cloud identity-token transport/storage are deferred prerequisites |
+| 05–06 | OAuth, encrypted tokens, session/CSRF/API/WebSocket boundaries | State/PKCE/login/owner/expiry/revocation tests; real local startup and OAuth initiation | Verified locally | Interactive Google consent before provider enablement |
+| 07–08 | Signed services/callbacks and owner-scoped Calendar gateway | Real A2A discovery contracts, replay/caller checks, no default-user or raw-token endpoint | Local topology verified | Cloud identity-token transport/storage are deferred prerequisites |
 | 09 | Parameterized filters and place-ID arrays; trusted callback destinations | Hostile values remain parameters; invalid limits denied; destination mismatch denied | Verified locally | Trusted environment configuration must remain protected |
 | 10 | Reduced sensitive logging, debug removal, build exclusions and history scan | 370 blobs checked with no secret matches; upload-context review; debug route denials | Source verified | Oversized historical media excluded from scan; no history rewrite |
 
-### P0 local checkpoint complete â€” 1 November 2026
+### P0 local checkpoint complete — 1 November 2026
 
 All ten P0 source items are verified for the restricted local scope above. The final security suite passed **56 tests** in the new dependency environment. Real local process checks, all five service imports, per-service lock closure and `pip check` passed. Python locks have no known advisories in the saved reports. The owner committed the frontend dependency checkpoint; remaining source files are listed in `P0-COMMIT-FILES.txt` for the next coordinated commit.
 

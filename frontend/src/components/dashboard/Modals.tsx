@@ -12,16 +12,12 @@ interface SdrModalProps {
 }
 
 export function SdrModal({ business, isOpen, onClose, onConfirm }: SdrModalProps) {
-  const [phoneOverride, setPhoneOverride] = useState('');
-
-  // Update input when business changes
-  React.useEffect(() => {
-    if (business) {
-      setPhoneOverride(business.phone || '');
-    }
-  }, [business]);
-
   if (!isOpen || !business) return null;
+  return <SdrModalForm key={business.id} business={business} onClose={onClose} onConfirm={onConfirm} />;
+}
+
+function SdrModalForm({ business, onClose, onConfirm }: Omit<SdrModalProps, 'isOpen' | 'business'> & { business: Business }) {
+  const [phoneOverride, setPhoneOverride] = useState(business.phone || '');
 
   return (
     <div className="fixed inset-0 bg-black/50 flex justify-center items-center z-50 backdrop-blur-sm">

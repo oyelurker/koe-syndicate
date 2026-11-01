@@ -1211,7 +1211,7 @@ async def start_lead_finding(city: str = Form(...), niche: str = Form(None)):
 async def get_businesses():
     """API endpoint to get all businesses."""
     return {
-        "businesses": [business.dict() for business in app_state["businesses"].values()],
+        "businesses": [business.model_dump() for business in app_state["businesses"].values()],
         "total": len(app_state["businesses"])
     }
 

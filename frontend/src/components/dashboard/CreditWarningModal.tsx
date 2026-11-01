@@ -50,7 +50,7 @@ export function CreditWarningModal({ isOpen, onClose, onRunDemo, message, missin
           </div>
           
           <p className="text-gray-600 text-sm mt-2">
-            You can still experience the full platform by running the <b>Animated Demo Simulation</b>, which doesn't use any API credits!
+            You can still experience the full platform by running the <b>Animated Demo Simulation</b>, which doesn&apos;t use any API credits!
           </p>
         </div>
 

@@ -17,26 +17,6 @@ from common.security import (Execution, ServiceAuth, ServiceMiddleware, Security
 from ui_client import db, oauth, security
 
 
-@pytest.fixture(autouse=True)
-def settings(monkeypatch, tmp_path):
-    values = {"APP_ENV": "development", "SESSION_SECRET": "s" * 48,
-              "TOKEN_ENCRYPTION_KEY": base64.urlsafe_b64encode(b"t" * 32).decode(),
-              "KOE_OWNER_EMAIL": "owner@example.test", "KOE_MODE": "demo",
-              "MOCK_SDR": "false", "MOCK_LEAD_FINDER": "false",
-              "SECURITY_DB_PATH": str(tmp_path / "nonces.db"),
-              "GOOGLE_OAUTH_CLIENT_ID": "test-client", "GOOGLE_OAUTH_CLIENT_SECRET": "test-secret",
-              "GOOGLE_OAUTH_REDIRECT_URI": "http://localhost:8000/auth/google/callback",
-              "NEXT_PUBLIC_FRONTEND_URL": "http://localhost:3000",
-              "UI_CLIENT_SERVICE_URL": "http://localhost:8000", "SDR_SERVICE_URL": "http://localhost:8084",
-              "SERVICE_AUTH_KEYS": json.dumps({key: key + "k" * 48 for key in
-                  ["ui-client", "sdr", "lead-manager", "lead-finder", "gmail-listener"]})}
-    for name, value in values.items():
-        monkeypatch.setenv(name, value)
-    for name in ["CALLS", "EMAIL", "CALENDAR"]:
-        monkeypatch.setenv("ENABLE_LIVE_" + name, "false")
-    monkeypatch.setattr(db, "DB_PATH", tmp_path / "tokens.db")
-
-
 @pytest.fixture
 def client(monkeypatch):
     import ui_client.main as main

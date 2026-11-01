@@ -1,19 +1,19 @@
 "use client";
 
 import { apiFetch } from "@/lib/api";
+import Link from 'next/link';
 import React, { useState, useEffect } from 'react';
-import { Mail, Power, Calendar, Check, AlertCircle, Home } from 'lucide-react';
+import { Power, Calendar, Check, AlertCircle, Home } from 'lucide-react';
 import { Business } from './data';
 
 interface SidebarProps {
   businesses: Business[];
-  onTriggerLeadManager: () => void;
   onReset: () => void;
   onRunDemo: () => void;
   isDemoRunning: boolean;
 }
 
-export function Sidebar({ businesses, onTriggerLeadManager, onReset, onRunDemo, isDemoRunning }: SidebarProps) {
+export function Sidebar({ businesses, onReset, onRunDemo, isDemoRunning }: SidebarProps) {
   const [calendarEmail, setCalendarEmail] = useState<string | null>(null);
 
   useEffect(() => {
@@ -56,7 +56,7 @@ export function Sidebar({ businesses, onTriggerLeadManager, onReset, onRunDemo, 
         extraParams = `?city=${encodeURIComponent(city)}&niche=${encodeURIComponent(niche)}`;
       }
     }
-    window.location.href = `${backendUrl}/auth/google${extraParams}`;
+    window.location.assign(new URL(`/auth/google${extraParams}`, backendUrl).href);
   };
 
   const handleDisconnectCalendar = async () => {
@@ -148,12 +148,12 @@ export function Sidebar({ businesses, onTriggerLeadManager, onReset, onRunDemo, 
         >
           <Power size={16} /> Reset State
         </button>
-        <a 
+        <Link
           href="/"
           className="flex items-center justify-center gap-2 w-full p-3 bg-white border border-gray-200 text-gray-600 font-inter font-medium text-sm rounded-xl hover:bg-gray-50 hover:text-gray-900 transition-colors"
         >
           <Home size={16} /> Back to Home
-        </a>
+        </Link>
       </div>
     </div>
   );

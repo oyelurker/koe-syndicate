@@ -1,4 +1,5 @@
 "use client";
+import Image from "next/image";
 
 import React, { useEffect, useRef, useState } from "react";
 import { motion, useSpring, useTransform, useInView } from "framer-motion";
@@ -243,9 +244,6 @@ export default function MetricAndTestimonials({ className }: { className?: strin
 
   return (
     <>
-      <link rel="preconnect" href="https://fonts.googleapis.com" />
-      <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-      <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" crossOrigin="anonymous" />
 
       <div className={"flex flex-col w-full " + (className || "")}>
         {/* Metrics Section */}
@@ -386,7 +384,7 @@ export default function MetricAndTestimonials({ className }: { className?: strin
 
                           <div className="flex flex-col items-center">
                             <div className="w-[48px] h-[48px] rounded-full overflow-hidden mb-[12px] border-2 border-white/20">
-                              <img src={item.avatar} alt={item.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                              <Image width={48} height={48} unoptimized src={item.avatar} alt={item.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
                             </div>
 
                             <p

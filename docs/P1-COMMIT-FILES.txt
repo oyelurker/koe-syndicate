@@ -1,0 +1,88 @@
+.github/dependabot.yml
+.github/workflows/ci.yml
+Dockerfile.test
+conftest.py
+docs/FIX-CHECKLIST.md
+docs/P1-COMMIT-FILES.txt
+docs/P1-VERIFICATION.md
+frontend/package.json
+frontend/src/app/dashboard/page.tsx
+frontend/src/app/globals.css
+frontend/src/app/layout.tsx
+frontend/src/components/dashboard/CreditWarningModal.tsx
+frontend/src/components/dashboard/Modals.tsx
+frontend/src/components/dashboard/Pipeline.tsx
+frontend/src/components/dashboard/Sidebar.tsx
+frontend/src/components/templates/landing-page-koe/Blogs 01 Koe.tsx
+frontend/src/components/templates/landing-page-koe/CTA with Footer 01 Koe.tsx
+frontend/src/components/templates/landing-page-koe/Feature 01 Koe.tsx
+frontend/src/components/templates/landing-page-koe/Header 01 Koe.tsx
+frontend/src/components/templates/landing-page-koe/How it Works 01 Koe.tsx
+frontend/src/components/templates/landing-page-koe/Integration 01 Koe.tsx
+frontend/src/components/templates/landing-page-koe/Metrics with Testimonial 01 Koe.tsx
+frontend/src/components/templates/landing-page-koe/Metrics with logo 01 Koe.tsx
+frontend/src/components/templates/landing-page-koe/Pricing Plan 01 Koe.tsx
+frontend/src/components/templates/landing-page-koe/Why Choose Us 01 Koe.tsx
+lead_finder/tests/test_agent.py
+lead_finder/tests/test_agent2.py
+lead_finder/tests/test_agent3.py
+lead_finder/tests/test_agent_full.py
+lead_finder/tests/test_inv.py
+lead_finder/tests/test_inv2.py
+lead_finder/tests/test_inv3.py
+lead_finder/tests/test_inv4.py
+lead_finder/tests/test_maps_direct.py
+lead_finder/tests/test_merger.py
+lead_finder/tests/test_merger2.py
+lead_finder/tests/test_merger3.py
+lead_finder/tests/test_merger4.py
+lead_finder/tests/test_sig.py
+pyproject.toml
+scripts/check_secrets.py
+scripts/manual_checks/README.md
+scripts/manual_checks/lead_finder/test_agent.py
+scripts/manual_checks/lead_finder/test_agent2.py
+scripts/manual_checks/lead_finder/test_agent3.py
+scripts/manual_checks/lead_finder/test_agent_full.py
+scripts/manual_checks/lead_finder/test_inv.py
+scripts/manual_checks/lead_finder/test_inv2.py
+scripts/manual_checks/lead_finder/test_inv3.py
+scripts/manual_checks/lead_finder/test_inv4.py
+scripts/manual_checks/lead_finder/test_maps_direct.py
+scripts/manual_checks/lead_finder/test_merger.py
+scripts/manual_checks/lead_finder/test_merger2.py
+scripts/manual_checks/lead_finder/test_merger3.py
+scripts/manual_checks/lead_finder/test_merger4.py
+scripts/manual_checks/lead_finder/test_sig.py
+scripts/manual_checks/root/test_a2a.py
+scripts/manual_checks/root/test_a2a_task.py
+scripts/manual_checks/root/test_a2a_taskstate.py
+scripts/manual_checks/root/test_a2a_taskstatus.py
+scripts/manual_checks/root/test_adk.py
+scripts/manual_checks/root/test_app.py
+scripts/manual_checks/root/test_fastapi.py
+scripts/manual_checks/root/test_gemini_15.py
+scripts/manual_checks/root/test_maps.py
+scripts/manual_checks/root/test_ping.py
+scripts/manual_checks/root/test_req.py
+scripts/manual_checks/root/test_req2.py
+scripts/manual_checks/root/test_template.py
+scripts/manual_checks/root/test_ui_trace.py
+tests/offline/test_ci_guards.py
+tests/security/test_p0.py
+tests/test_a2a.py
+tests/test_a2a_task.py
+tests/test_a2a_taskstate.py
+tests/test_a2a_taskstatus.py
+tests/test_adk.py
+tests/test_app.py
+tests/test_fastapi.py
+tests/test_gemini_15.py
+tests/test_maps.py
+tests/test_ping.py
+tests/test_req.py
+tests/test_req2.py
+tests/test_template.py
+tests/test_ui_trace.py
+ui_client/main.py
+ui_client/test/test_ui_client.py

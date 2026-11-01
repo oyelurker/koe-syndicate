@@ -4,13 +4,14 @@ import React, { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { ArrowUpRight, Menu, X, Search, Sparkles } from "lucide-react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
+import Image from "next/image";
 
 export default function KoeOriginalHeader({ className }: { className?: string }) {
   const router = useRouter();
   const [city, setCity] = useState("");
   const [niche, setNiche] = useState("");
   const [isNavHovered, setIsNavHovered] = useState(false);
-  const [isCTAHovered, setIsCTAHovered] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isMounted, setIsMounted] = useState(false);
 
@@ -34,9 +35,6 @@ export default function KoeOriginalHeader({ className }: { className?: string })
 
   return (
     <>
-      <link rel="preconnect" href="https://fonts.googleapis.com" />
-      <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-      <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Onest:wght@400;500;600;700&family=Playfair+Display:ital,wght@1,600&display=swap" rel="stylesheet" crossOrigin="anonymous" />
 
       <motion.section
         initial={{ opacity: 0 }}
@@ -70,9 +68,9 @@ export default function KoeOriginalHeader({ className }: { className?: string })
             transition={{ delay: 0.2, duration: 0.6, ease: "easeOut" as const }}
             className="flex items-center justify-between"
           >
-            <a href="/" className="flex items-center gap-2 hover:opacity-80 transition-opacity">
+            <Link href="/" className="flex items-center gap-2 hover:opacity-80 transition-opacity">
               <span className="font-onest font-bold text-2xl text-[#042718] tracking-tight">KOE Syndicate</span>
-            </a>
+            </Link>
 
             {/* Desktop Menu */}
             <ul className="hidden lg:flex items-center gap-8">
@@ -260,8 +258,6 @@ export default function KoeOriginalHeader({ className }: { className?: string })
               />
               <button
                 type="submit"
-                onMouseEnter={() => setIsCTAHovered(true)}
-                onMouseLeave={() => setIsCTAHovered(false)}
                 className="w-full sm:w-auto flex items-center justify-center gap-2 h-12 px-6 rounded-xl sm:rounded-full bg-[#042718] text-white font-inter font-medium hover:bg-[#063b24] transition-colors"
               >
                 <span>Run Discovery Scan</span>
@@ -322,19 +318,19 @@ export default function KoeOriginalHeader({ className }: { className?: string })
                   {[...Array(2)].map((_: unknown, i: number) => (
                     <React.Fragment key={i}>
                       <div className="flex items-center gap-3 text-white/80 hover:text-white transition-colors cursor-default">
-                        <img src="https://cdn.simpleicons.org/nvidia/white" alt="NVIDIA" className="w-6 h-6 sm:w-8 sm:h-8" />
+                        <Image width={32} height={32} unoptimized src="https://cdn.simpleicons.org/nvidia/white" alt="NVIDIA" className="w-6 h-6 sm:w-8 sm:h-8" />
                         <span className="font-onest font-bold text-xl sm:text-2xl tracking-tighter uppercase whitespace-nowrap">NVIDIA RAPIDS</span>
                       </div>
                       <div className="flex items-center gap-3 text-white/80 hover:text-white transition-colors cursor-default">
-                        <img src="https://cdn.simpleicons.org/googlecloud/white" alt="Google Cloud" className="w-6 h-6 sm:w-8 sm:h-8" />
+                        <Image width={32} height={32} unoptimized src="https://cdn.simpleicons.org/googlecloud/white" alt="Google Cloud" className="w-6 h-6 sm:w-8 sm:h-8" />
                         <span className="font-onest font-bold text-xl sm:text-2xl tracking-tighter uppercase whitespace-nowrap">Google Cloud</span>
                       </div>
                       <div className="flex items-center gap-3 text-white/80 hover:text-white transition-colors cursor-default">
-                        <img src="https://cdn.simpleicons.org/googlegemini/white" alt="Gemini" className="w-6 h-6 sm:w-8 sm:h-8" />
+                        <Image width={32} height={32} unoptimized src="https://cdn.simpleicons.org/googlegemini/white" alt="Gemini" className="w-6 h-6 sm:w-8 sm:h-8" />
                         <span className="font-onest font-bold text-xl sm:text-2xl tracking-tighter uppercase whitespace-nowrap">Gemini 2.0 Flash</span>
                       </div>
                       <div className="flex items-center gap-3 text-white/80 hover:text-white transition-colors cursor-default">
-                        <img src="https://cdn.simpleicons.org/elevenlabs/white" alt="ElevenLabs" className="w-6 h-6 sm:w-8 sm:h-8" />
+                        <Image width={32} height={32} unoptimized src="https://cdn.simpleicons.org/elevenlabs/white" alt="ElevenLabs" className="w-6 h-6 sm:w-8 sm:h-8" />
                         <span className="font-onest font-bold text-xl sm:text-2xl tracking-tighter uppercase whitespace-nowrap">ElevenLabs</span>
                       </div>
                     </React.Fragment>

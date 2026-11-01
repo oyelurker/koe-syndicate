@@ -79,9 +79,6 @@ function BlogCard({ image, date, title, description, tags, imageTop = true, dela
 export default function Blog01Koe({ className }: { className?: string }) {
   return (
     <>
-      <link rel="preconnect" href="https://fonts.googleapis.com" />
-      <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-      <link href="https://fonts.googleapis.com/css2?family=Onest:wght@400;500;600;700&display=swap" rel="stylesheet" />
 
       <section className={"w-full bg-[#FFFFFF] py-16 md:py-[100px] flex justify-center " + (className || "")}>
         <div className="w-full max-w-[1440px] px-6 lg:px-[96px]">

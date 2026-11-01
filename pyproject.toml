@@ -1,3 +1,9 @@
 [tool.pytest.ini_options]
+testpaths = ["tests", "ui_client/test"]
+pythonpath = ["."]
+addopts = "--strict-config --strict-markers --import-mode=importlib"
+required_plugins = ["pytest-asyncio>=1"]
+asyncio_mode = "strict"
 asyncio_default_fixture_loop_scope = "function"
+norecursedirs = ["manual_checks", ".runtime", "venv", ".venv", ".audit-venv", "node_modules", ".git", "dist", "build"]
 

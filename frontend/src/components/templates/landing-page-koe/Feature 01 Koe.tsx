@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import { motion } from "framer-motion";
+import Image from "next/image";
 import { Map, Mic, Inbox, Monitor, Sparkles } from "lucide-react";
 
 interface FeatureCardProps {
@@ -15,7 +16,7 @@ interface FeatureCardProps {
   isMounted?: boolean;
 }
 
-function FeatureCard({ title, description, icon: Icon, uiSrc, width: _width, className = "", delay = 0, isMounted = false }: FeatureCardProps) {
+function FeatureCard({ title, description, icon: Icon, uiSrc, className = "", delay = 0, isMounted = false }: FeatureCardProps) {
   return (
     <motion.div
       initial={{ y: 40, opacity: 0 }}
@@ -40,7 +41,10 @@ function FeatureCard({ title, description, icon: Icon, uiSrc, width: _width, cla
           </video>
         )}
         <div className="relative z-10 w-full h-full flex items-center justify-center">
-          <img
+          <Image
+            fill
+            sizes="(min-width: 1024px) 50vw, 100vw"
+            unoptimized
             src={uiSrc}
             alt={title}
             className="h-full w-full object-contain pointer-events-none select-none transition-all duration-500 group-hover:translate-y-[-10px]"
@@ -106,9 +110,6 @@ export default function OriginaKoeFeature({ className }: { className?: string })
 
   return (
     <>
-      <link rel="preconnect" href="https://fonts.googleapis.com" />
-      <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-      <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Onest:wght@400;500;600;700&family=Playfair+Display:ital,wght@1,600&display=swap" rel="stylesheet" crossOrigin="anonymous" />
 
       <section className={"w-full bg-[#FFFFFF] py-20 lg:py-32 overflow-hidden " + (className || "")}>
         <div className="max-w-[1280px] mx-auto px-4 sm:px-6 lg:px-8">

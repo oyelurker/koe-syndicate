@@ -1,7 +1,6 @@
 "use client";
 
 import React from 'react';
-import { Database, SatelliteDish, Crosshair } from 'lucide-react';
 import { Business } from './data';
 import { BusinessCard } from './BusinessCard';
 

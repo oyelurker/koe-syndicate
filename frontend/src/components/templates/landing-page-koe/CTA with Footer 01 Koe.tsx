@@ -81,9 +81,6 @@ export default function CtaWithFooter01Koe({ className }: { className?: string }
 
   return (
     <>
-      <link rel="preconnect" href="https://fonts.googleapis.com" />
-      <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-      <link href="https://fonts.googleapis.com/css2?family=Onest:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
 
       <footer className={"relative w-full overflow-hidden flex flex-col items-center " + (className || "")}>
         {/* Background Video for the entire footer */}

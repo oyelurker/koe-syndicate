@@ -48,6 +48,7 @@ function FeatureCard({
       transition={{ duration: 0.8, delay, ease: [0.21, 0.47, 0.32, 0.98] as const }}
       style={{ backgroundColor: bgColor }}
       className="flex w-full lg:w-[400px] p-6 md:p-8 flex-col items-start rounded-[24px]"
+      aria-label={brandName}
     >
       <div className="flex items-center gap-[12px] mb-[20px]">
         <div
