@@ -36,6 +36,11 @@ private_deployment.md
 
 # Local Database
 tokens.db
+*.db
+*.sqlite
+*.sqlite3
+*.sqlite-*
+*.sqlite3-*
 .runtime/
 .audit-venv/
 *.db-*

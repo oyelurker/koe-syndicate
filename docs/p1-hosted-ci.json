@@ -1,0 +1,41 @@
+{
+  "commit": "844bce68daff9ae28bd582fc78ab55d46fd3a911",
+  "run_url": "https://github.com/oyelurker/koe-syndicate/actions/runs/41275060918",
+  "run_conclusion": "success",
+  "jobs": [
+    {
+      "name": "dependency-audit",
+      "conclusion": "success"
+    },
+    {
+      "name": "frontend",
+      "conclusion": "success"
+    },
+    {
+      "name": "secrets",
+      "conclusion": "success"
+    },
+    {
+      "name": "backend (windows-latest)",
+      "conclusion": "success"
+    },
+    {
+      "name": "backend (ubuntu-latest)",
+      "conclusion": "success"
+    },
+    {
+      "name": "required-checks",
+      "conclusion": "success"
+    }
+  ],
+  "branch_protection": {
+    "required_check": "required-checks",
+    "app_id": 15368,
+    "strict": true,
+    "enforce_admins": true,
+    "pull_requests_required": true,
+    "required_approvals": 0,
+    "force_pushes_allowed": false,
+    "deletions_allowed": false
+  }
+}

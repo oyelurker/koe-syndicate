@@ -18,6 +18,10 @@ venv/
 !**/.env.example
 *.db
 *.db-*
+*.sqlite
+*.sqlite3
+*.sqlite-*
+*.sqlite3-*
 *-service.json
 **/node_modules/
 **/.next/

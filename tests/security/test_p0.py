@@ -223,7 +223,13 @@ def test_disconnect_revokes_existing_websocket(client):
     with client.websocket_connect("/ws", headers={"Origin": "http://localhost:3000"}) as socket:
         socket.receive_json()
         assert client.post("/auth/disconnect", headers=headers).status_code == 200
-        client.portal.call(main.manager.send_update, {"type": "private_update"})
+        async def publish_as_service():
+            token = execution.set(Execution("owner@example.test", "demo"))
+            try:
+                await main.manager.send_update({"type": "private_update"})
+            finally:
+                execution.reset(token)
+        client.portal.call(publish_as_service)
         with pytest.raises(WebSocketDisconnect):
             socket.receive_json()
 

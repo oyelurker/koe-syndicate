@@ -5,6 +5,12 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+    inputs:
+      exercise_failure_gate:
+        description: 'Intentionally fail the Linux test step to verify required-check propagation; rerun normally afterwards'
+        type: boolean
+        required: false
+        default: false
   schedule:
     - cron: '17 3 * * 1'
 
@@ -45,6 +51,11 @@ jobs:
       - run: python scripts/p0_lock_check.py
       - run: python scripts/p0_import_smoke.py
       - run: python -m pytest -q
+      - name: Exercise intentional test failure (manual verification only)
+        if: github.event_name == 'workflow_dispatch' && inputs.exercise_failure_gate && matrix.os == 'ubuntu-latest'
+        run: |
+          python -c "from pathlib import Path; p=Path('.runtime/ci-failure-probe'); p.mkdir(parents=True,exist_ok=True); (p/'pytest.ini').write_text('[pytest]\n'); (p/'test_expected_failure.py').write_text('def test_intentional_ci_failure():\n    assert False, \'Intentional CI gate verification\'\n')"
+          python -m pytest -c .runtime/ci-failure-probe/pytest.ini --noconftest .runtime/ci-failure-probe/test_expected_failure.py -q
 
   frontend:
     runs-on: ubuntu-latest
