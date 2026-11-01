@@ -41,7 +41,7 @@ class GoogleMapsClient:
             logger.info("Google Maps client tested successfully")
         except Exception as e:
             logger.error(f"Failed to initialize Google Maps client: {e}")
-            logger.error(f"API Key (first 10 chars): {GOOGLE_MAPS_API_KEY[:10] if GOOGLE_MAPS_API_KEY else 'N/A'}")
+            logger.error("Google Maps client initialization failed; credential values are omitted")
             self.client = None
 
     def _ensure_client(self):

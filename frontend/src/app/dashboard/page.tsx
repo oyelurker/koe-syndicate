@@ -1,5 +1,6 @@
 "use client";
 
+import { apiFetch } from "@/lib/api";
 import React, { useState, useEffect, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Sidebar } from '@/components/dashboard/Sidebar';
@@ -17,8 +18,9 @@ function DashboardContent() {
   // Start with empty state for simulation
   const [businesses, setBusinesses] = useState<Business[]>([]);
   const [updates, setUpdates] = useState<AgentUpdate[]>([]);
-  const [activeOperation, setActiveOperation] = useState(`${cityParam} ${nicheParam ? `- ${nicheParam}` : ''}`.toUpperCase());
+  const [activeOperation] = useState(`${cityParam} ${nicheParam ? `- ${nicheParam}` : ''}`.toUpperCase());
   const [isDemoRunning, setIsDemoRunning] = useState(false);
+  const [showDemo, setShowDemo] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   
   // Credits Check State
@@ -40,7 +42,7 @@ function DashboardContent() {
         const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';
         
         // Check Google Auth
-        const authRes = await fetch(`${backendUrl}/auth/status`, { credentials: 'include' });
+        const authRes = await apiFetch(`${backendUrl}/auth/status`, { credentials: 'include' });
         if (authRes.ok) {
           const authData = await authRes.json();
           setIsAuthenticated(authData.connected === true);
@@ -51,7 +53,7 @@ function DashboardContent() {
             formData.append('city', cityParam);
             if (nicheParam) formData.append('niche', nicheParam);
             
-            fetch(`${backendUrl}/start_lead_finding`, {
+            apiFetch(`${backendUrl}/start_lead_finding`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
               body: formData.toString()
@@ -79,7 +81,7 @@ function DashboardContent() {
         }
         
         // Pre-check system readiness
-        const sysRes = await fetch(`${backendUrl}/api/system-status`);
+        const sysRes = await apiFetch(`${backendUrl}/api/system-status`);
         if (sysRes.ok) {
           const sysData = await sysRes.json();
           setSystemReady(sysData.ready);
@@ -98,11 +100,11 @@ function DashboardContent() {
       }
     };
     fetchStatus();
-  }, [cityParam]);
+  }, [cityParam, nicheParam]);
 
   // WebSocket Connection (kept for real-time mode if needed, though demo overrides)
   useEffect(() => {
-    const wsUrl = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000/ws';
+    const wsUrl = process.env.NEXT_PUBLIC_WS_URL || `${(process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000').replace(/^http/, 'ws')}/ws`;
     const ws = new WebSocket(wsUrl);
 
     ws.onmessage = (event) => {
@@ -170,7 +172,7 @@ function DashboardContent() {
   }, [autoStartDemo]);
 
   // The actual Demo Simulation Runner
-  const handleRunDemo = async () => {
+  async function handleRunDemo() {
     const demoBusinesses = getMockBusinesses(cityParam, nicheParam);
     const b4name = demoBusinesses[3]?.name || 'Local Business';
     const b5name = demoBusinesses[4]?.name || 'Local Agency';
@@ -178,6 +180,7 @@ function DashboardContent() {
     const b9name = demoBusinesses[8]?.name || 'Top Lead';
     const displayCity = cityParam.charAt(0).toUpperCase() + cityParam.slice(1).toLowerCase();
 
+    setShowDemo(true);
     setIsDemoRunning(true);
     setBusinesses([]);
     setUpdates([{ id: 'init', timestamp: new Date().toISOString(), agent_type: 'system', message: `SYSTEM INITIALIZED. OPERATION: ${cityParam.toUpperCase()} — ${nicheParam ? nicheParam.toUpperCase() : 'ALL NICHES'}` }]);
@@ -213,41 +216,14 @@ function DashboardContent() {
       setUpdates(prev => [...prev, { id: 'lm2', timestamp: new Date().toISOString(), agent_type: 'lead_manager', message: `Drafting personalized response to ${b8name} and scheduling link sent to ${b9name}.` }]);
       
       // Phase 4: Meeting Scheduled (13s)
-      let calendarEventUrl = "";
+      const calendarEventUrl = "";
       let calendarEventDate = "";
       
-      if (isAuthenticated) {
-        try {
-          const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';
-          const res = await fetch(`${backendUrl}/auth/schedule-meeting`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ lead_name: b9name }),
-            credentials: 'include'
-          });
-          if (res.ok) {
-            const data = await res.json();
-            calendarEventUrl = data.event_url;
-            calendarEventDate = data.date;
-            setUpdates(prev => [...prev, { id: 'lm3', timestamp: new Date().toISOString(), agent_type: 'system', message: `Successfully created Google Calendar event for ${b9name}.` }]);
-          } else {
-            let errorMsg = 'Failed to create calendar event (unauthorized).';
-            try {
-              const errData = await res.json();
-              if (errData.error) errorMsg = `Calendar Error: ${errData.error}`;
-            } catch (e) {}
-            setUpdates(prev => [...prev, { id: 'lm3', timestamp: new Date().toISOString(), agent_type: 'system', message: errorMsg }]);
-          }
-        } catch (err) {
-          console.error("Failed to schedule meeting", err);
-        }
-      } else {
-        // Fallback fake date
-        const d = new Date();
-        d.setDate(d.getDate() + 2);
-        d.setHours(10, 0, 0, 0);
-        calendarEventDate = d.toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' });
-      }
+      // Simulation never calls Calendar, even when the user is authenticated.
+      const d = new Date();
+      d.setDate(d.getDate() + 2);
+      d.setHours(10, 0, 0, 0);
+      calendarEventDate = `Simulated: ${d.toLocaleString()}`;
 
       setBusinesses(prev => prev.map(b => 
         b.id === 'b9' ? { 
@@ -266,6 +242,7 @@ function DashboardContent() {
   // ── Partial Demo: runs SDR → Lead Manager → Calendar on EXISTING businesses ──
   const handleRunDemoFromOutreach = async (targetBusiness: Business) => {
     setIsCreditsModalOpen(false);
+    setShowDemo(true);
     setIsDemoRunning(true);
 
     const b4name = businesses[3]?.name || targetBusiness.name;
@@ -298,31 +275,14 @@ function DashboardContent() {
         { id: 'demo_lm2', timestamp: new Date().toISOString(), agent_type: 'lead_manager', message: `Drafting personalized response to ${b8name} and scheduling link sent to ${b9name}.` }
       ]);
 
-      let calendarEventUrl = "";
+      const calendarEventUrl = "";
       let calendarEventDate = "";
 
-      if (isAuthenticated) {
-        try {
-          const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';
-          const res = await fetch(`${backendUrl}/auth/schedule-meeting`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ lead_name: b9name }),
-            credentials: 'include'
-          });
-          if (res.ok) {
-            const data = await res.json();
-            calendarEventUrl = data.event_url;
-            calendarEventDate = data.date;
-            setUpdates(prev => [...prev, { id: 'demo_cal', timestamp: new Date().toISOString(), agent_type: 'system', message: `Successfully created Google Calendar event for ${b9name}.` }]);
-          }
-        } catch (e) { console.error('Calendar booking failed', e); }
-      } else {
-        const d = new Date();
-        d.setDate(d.getDate() + 2);
-        d.setHours(10, 0, 0, 0);
-        calendarEventDate = d.toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' });
-      }
+      // Simulation never calls Calendar, even when the user is authenticated.
+      const d = new Date();
+      d.setDate(d.getDate() + 2);
+      d.setHours(10, 0, 0, 0);
+      calendarEventDate = `Simulated: ${d.toLocaleString()}`;
 
       setBusinesses(prev => prev.map(b =>
         b.name === b9name ? { ...b, status: 'meeting_scheduled', calendar_event_url: calendarEventUrl, calendar_event_date: calendarEventDate } : b
@@ -338,6 +298,10 @@ function DashboardContent() {
 
   const handleConfirmOutreach = async (business: Business, phoneOverride: string) => {
     setIsSdrModalOpen(false);
+    if (showDemo) {
+      await handleRunDemoFromOutreach(business);
+      return;
+    }
     setSelectedBusiness(business); // keep reference for demo
     
     // Show a quick "Attempting outreach..." log
@@ -354,7 +318,7 @@ function DashboardContent() {
       formData.append('business_id', business.id);
       if (phoneOverride) formData.append('user_phone', phoneOverride);
       
-      const res = await fetch(`${backendUrl}/send_to_sdr`, {
+      const res = await apiFetch(`${backendUrl}/send_to_sdr`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: formData.toString()
@@ -362,7 +326,8 @@ function DashboardContent() {
 
       if (!res.ok) {
         // Real call failed — show credit warning with option to run demo
-        setCreditsError(`Outbound call to ${phoneOverride} blocked. Google API billing account, ElevenLabs, and Twilio trial credits exhausted.`);
+        const error = await res.json().catch(() => ({}));
+        setCreditsError(error.error || `Outreach failed (${res.status}).`);
         setIsCreditsModalOpen(true);
         return;
       }
@@ -373,7 +338,7 @@ function DashboardContent() {
       setUpdates(prev => [...prev, { id: `u${Date.now()}`, timestamp: new Date().toISOString(), agent_type: 'sdr', message: `Live call initiated to ${business.name}. Context transferred.` }]);
       
     } catch {
-      setCreditsError(`Connection error while calling ${phoneOverride}. API credits may be exhausted.`);
+      setCreditsError("Unable to reach the outreach service. No successful call has been confirmed.");
       setIsCreditsModalOpen(true);
     }
   };
@@ -388,7 +353,7 @@ function DashboardContent() {
     return <div className="flex h-screen items-center justify-center bg-[#f8f9fa] font-onest text-xl font-bold text-[#042718]">Verifying connection...</div>;
   }
 
-  if (!isAuthenticated && !isDemoRunning) {
+  if (!isAuthenticated && !showDemo) {
     const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';
     const loginUrl = `${backendUrl}/auth/google?city=${encodeURIComponent(cityParam)}&niche=${encodeURIComponent(nicheParam)}`;
     return (
@@ -438,7 +403,7 @@ function DashboardContent() {
           <div>
             <div className="flex items-center gap-3">
               <h2 className="font-onest text-2xl font-bold tracking-tight text-[#042718]">Active Discovery Scan</h2>
-              {!systemReady && <span className="px-2 py-0.5 rounded text-xs font-bold bg-amber-100 text-amber-800 border border-amber-300">DEMO MODE</span>}
+              {(showDemo || !systemReady) && <span className="px-2 py-0.5 rounded text-xs font-bold bg-amber-100 text-amber-800 border border-amber-300">DEMO MODE</span>}
             </div>
             <div className="text-gray-500 font-medium mt-1">OPERATION: {activeOperation}</div>
           </div>

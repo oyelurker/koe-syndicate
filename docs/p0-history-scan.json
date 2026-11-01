@@ -1,0 +1,18 @@
+{
+  "commits_scanned": 74,
+  "blobs_scanned": 370,
+  "oversized_blobs_skipped": [
+    {
+      "blob": "ee48fbe050095679dd83c2595b9cab7f6ec07dc6",
+      "path": "Koe Syndicate_Submission Deck _ Gen AI Academy APAC Edition (1) (1).pptx",
+      "bytes": 8568084
+    },
+    {
+      "blob": "2cadf8d106b463632befe4a589c8f8011026fa3a",
+      "path": "UpdatedVideo_Submission_The Syndicates.mp4",
+      "bytes": 33292673
+    }
+  ],
+  "scope": "all local refs; Google/GitHub/OAuth/private-key patterns and configured local secret values; no values emitted",
+  "matches": []
+}

@@ -1,3 +1,4 @@
+from common.security import ServiceAuth
 """
 UI Notification tool for Lead Manager.
 """
@@ -29,6 +30,8 @@ async def notify_meeting_arranged(
     Returns:
         Dictionary containing notification result
     """
+    if meeting_data.get("success") is not True or not meeting_data.get("meeting_id"):
+        return {"success": False, "error": "No confirmed Calendar event; meeting notification withheld"}
     try:
         logger.info("📤 Sending meeting arrangement notification to UI...")
         
@@ -77,7 +80,7 @@ async def notify_meeting_arranged(
         logger.info(f"📋 Meeting arranged: {meeting_data.get('title', 'Unknown')} with {lead_data.get('name', 'Unknown')}")
         
         # Send notification
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(auth=ServiceAuth("lead-manager", "ui-client"), ) as client:
             response = await client.post(
                 callback_endpoint, 
                 json=payload, 
@@ -157,7 +160,7 @@ async def notify_meeting_arranged(
 #         }
         
 #         # Send notification
-#         async with httpx.AsyncClient() as client:
+#         async with httpx.AsyncClient(auth=ServiceAuth("lead-manager", "ui-client"), ) as client:
 #             response = await client.post(
 #                 callback_endpoint, 
 #                 json=payload, 

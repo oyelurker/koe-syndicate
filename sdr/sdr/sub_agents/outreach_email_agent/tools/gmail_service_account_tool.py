@@ -1,3 +1,4 @@
+from common.security import require_action
 """
 Gmail Service Account Tool - No manual authentication required.
 Uses service account with domain-wide delegation to send emails.
@@ -100,6 +101,7 @@ def send_email(to_email: str, subject: str, body: str, attachment_path: Optional
     Returns:
         dict containing send result with status and message/error info
     """
+    require_action("email")
     try:
         logger.info("🚀 SEND_EMAIL_WITH_ATTACHMENT FUNCTION CALLED!")
         logger.info(f"Function called with: to_email={to_email}, subject={subject[:50] if subject else 'None'}..., body_length={len(body) if body else 0}, attachment_path={attachment_path}")
@@ -230,7 +232,7 @@ def send_email_with_attachment(crafted_email: dict[str, Any], attachment_path: O
     Returns:
         dict containing send result with status and message/error info
     """
-    logger.info(f"[TOOL] Crafted email received: {crafted_email}")
+    logger.debug("Sensitive payload omitted")
     logger.info(f"[TOOL] Attachment path received: {attachment_path}")
     
     # Check if email was already sent successfully (similar to human_creation tool pattern)
@@ -240,7 +242,7 @@ def send_email_with_attachment(crafted_email: dict[str, Any], attachment_path: O
         existing_email_result = None
     
     if existing_email_result and isinstance(existing_email_result, dict) and existing_email_result.get("status") == "success":
-        logger.info(f"Skipping email send: email already sent successfully: {existing_email_result}")
+        logger.debug("Sensitive payload omitted")
         return existing_email_result
     
     # Ensure crafted_email has required fields

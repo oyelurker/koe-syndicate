@@ -1,3 +1,4 @@
+from common.security import ServiceMiddleware
 import logging
 import click
 import common.config as defaults
@@ -97,7 +98,7 @@ def main(host: str, port: int):
         import uvicorn
     
         logger.info(f"Starting RiskGuard A2A server on http://{host}:{port}/")
-        uvicorn.run(app_builder.build(), host=host, port=port)
+        uvicorn.run(ServiceMiddleware(app_builder.build(), "lead-finder", ['ui-client']), host=host, port=port)
             
     except Exception as e:
         logger.error(f"Failed to start LEAD FINDER A2A server: {e}")

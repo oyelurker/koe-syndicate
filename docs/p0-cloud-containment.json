@@ -1,0 +1,44 @@
+{
+  "verifiedAtUtc": "2026-11-01T03:17:10.0893826Z",
+  "project": "apac-cohort2-track3",
+  "region": "us-central1",
+  "iamOnly": true,
+  "services": [
+    {
+      "service": "lead-finder",
+      "publicInvoker": false,
+      "ingress": "all",
+      "invokerIamCheck": true,
+      "revision": "lead-finder-00001-gwf",
+      "url": "https://lead-finder-haxns53f7a-uc.a.run.app",
+      "anonymousHealthStatus": 403
+    },
+    {
+      "service": "lead-manager",
+      "publicInvoker": false,
+      "ingress": "all",
+      "invokerIamCheck": true,
+      "revision": "lead-manager-00001-qwm",
+      "url": "https://lead-manager-haxns53f7a-uc.a.run.app",
+      "anonymousHealthStatus": 403
+    },
+    {
+      "service": "sdr",
+      "publicInvoker": false,
+      "ingress": "all",
+      "invokerIamCheck": true,
+      "revision": "sdr-00001-6sd",
+      "url": "https://sdr-haxns53f7a-uc.a.run.app",
+      "anonymousHealthStatus": 403
+    },
+    {
+      "service": "ui-client",
+      "publicInvoker": false,
+      "ingress": "all",
+      "invokerIamCheck": true,
+      "revision": "ui-client-00002-lzp",
+      "url": "https://ui-client-haxns53f7a-uc.a.run.app",
+      "anonymousHealthStatus": 403
+    }
+  ]
+}

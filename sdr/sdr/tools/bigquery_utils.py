@@ -69,7 +69,7 @@ async def sdr_bigquery_upload(
 
     # --- Upload to BigQuery ---
     try:
-        logger.info(f"Attempting to insert record: {json.dumps(sdr_record, indent=2)}")
+        logger.debug("Sensitive payload omitted")
         client = bigquery.Client(project=project)
 
         # Ensure dataset exists

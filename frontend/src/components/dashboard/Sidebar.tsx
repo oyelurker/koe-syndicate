@@ -1,5 +1,6 @@
 "use client";
 
+import { apiFetch } from "@/lib/api";
 import React, { useState, useEffect } from 'react';
 import { Mail, Power, Calendar, Check, AlertCircle, Home } from 'lucide-react';
 import { Business } from './data';
@@ -27,7 +28,7 @@ export function Sidebar({ businesses, onTriggerLeadManager, onReset, onRunDemo, 
     const fetchAuthStatus = async () => {
       try {
         const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';
-        const res = await fetch(`${backendUrl}/auth/status`, { credentials: 'include' });
+        const res = await apiFetch(`${backendUrl}/auth/status`, { credentials: 'include' });
         if (res.ok) {
           const data = await res.json();
           if (data.connected && data.email) {
@@ -61,7 +62,7 @@ export function Sidebar({ businesses, onTriggerLeadManager, onReset, onRunDemo, 
   const handleDisconnectCalendar = async () => {
     try {
       const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';
-      await fetch(`${backendUrl}/auth/disconnect`, { method: 'POST', credentials: 'include' });
+      await apiFetch(`${backendUrl}/auth/disconnect`, { method: 'POST', credentials: 'include' });
       setCalendarEmail(null);
     } catch (err) {
       console.error("Failed to disconnect", err);

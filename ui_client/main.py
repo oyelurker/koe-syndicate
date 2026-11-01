@@ -19,18 +19,15 @@ from datetime import datetime
 from enum import Enum
 from dotenv import load_dotenv
 
-# Allow local HTTP testing for Google OAuth
-os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
+
 
 # Google OAuth imports
 import google.oauth2.credentials
-from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
-from itsdangerous import URLSafeSerializer
-
-from . import db
 
 load_dotenv()
+
+from . import db
 
 # ── NVIDIA RAPIDS Lead Scoring ────────────────────────────────────────────────
 # Import the GPU-accelerated (or sklearn fallback) scoring engine.
@@ -176,8 +173,8 @@ app_state = {
 }
 
 # Session Signer
-SESSION_SECRET = os.getenv("SESSION_SECRET", "koe-syndicate-secret-dev-key")
-signer = URLSafeSerializer(SESSION_SECRET)
+from common.security import ServiceAuth, SecurityError, require_action, mode
+from .security import BrowserSecurityMiddleware, validate_config
 
 class ConnectionManager:
     """Manages WebSocket connections for real-time updates."""
@@ -218,6 +215,7 @@ manager = ConnectionManager()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Handles application startup and shutdown events."""
+    validate_config()
     logger.info("UI Client starting up...")
     
     # Initialize SQLite database
@@ -243,7 +241,8 @@ async def lifespan(app: FastAPI):
     yield
     logger.info("UI Client shutting down...")
 
-app = FastAPI(lifespan=lifespan, debug=True)
+app = FastAPI(lifespan=lifespan, debug=False, docs_url=None, redoc_url=None, openapi_url=None)
+app.add_middleware(BrowserSecurityMiddleware)
 
 # Add CORS Middleware to allow requests from the frontend with cookies
 app.add_middleware(
@@ -340,260 +339,10 @@ except ImportError:
 app.include_router(rapids_router)
 # ── End RAPIDS API ────────────────────────────────────────────────────────────
 
-# ── Google OAuth API ──────────────────────────────────────────────────────────
-# Enables per-user Calendar connection
-
-auth_router = APIRouter(prefix="/auth", tags=["Auth"])
-
-# These should match your Google Cloud Console OAuth configuration
-CLIENT_ID = os.getenv("GOOGLE_OAUTH_CLIENT_ID")
-CLIENT_SECRET = os.getenv("GOOGLE_OAUTH_CLIENT_SECRET")
-REDIRECT_URI = os.getenv("GOOGLE_OAUTH_REDIRECT_URI", "http://localhost:8000/auth/google/callback")
-SCOPES = [
-    'https://www.googleapis.com/auth/calendar',
-    'https://www.googleapis.com/auth/calendar.events',
-    'https://www.googleapis.com/auth/userinfo.email',
-    'openid'
-]
-
-def get_client_config():
-    return {
-        "web": {
-            "client_id": CLIENT_ID,
-            "project_id": "koe-syndicate",
-            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-            "token_uri": "https://oauth2.googleapis.com/token",
-            "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
-            "client_secret": CLIENT_SECRET,
-            "redirect_uris": [REDIRECT_URI]
-        }
-    }
-
-@auth_router.get("/google")
-async def login_google(city: str = "", niche: str = ""):
-    """Starts the OAuth flow by building the auth URL manually (no PKCE)."""
-    if not CLIENT_ID or not CLIENT_SECRET:
-        return JSONResponse(status_code=500, content={"error": "OAuth credentials not configured in backend .env"})
-
-    from urllib.parse import urlencode
-    import base64
-    import json
-    
-    state_str = ""
-    if city or niche:
-        state_str = base64.b64encode(json.dumps({"city": city, "niche": niche}).encode()).decode()
-
-    params = {
-        "client_id": CLIENT_ID,
-        "redirect_uri": REDIRECT_URI,
-        "response_type": "code",
-        "scope": " ".join(SCOPES),
-        "access_type": "offline",
-        "prompt": "consent",
-        "state": state_str,
-    }
-    auth_url = f"https://accounts.google.com/o/oauth2/auth?{urlencode(params)}"
-    return RedirectResponse(url=auth_url)
-
-@auth_router.get("/google/callback")
-async def auth_google_callback(code: str, state: str = ""):
-    """Exchanges auth code for tokens and stores in SQLite, sets session cookie."""
-    try:
-        import requests as http_requests
-        token_response = http_requests.post(
-            "https://oauth2.googleapis.com/token",
-            data={
-                "code": code,
-                "client_id": CLIENT_ID,
-                "client_secret": CLIENT_SECRET,
-                "redirect_uri": REDIRECT_URI,
-                "grant_type": "authorization_code",
-            }
-        ).json()
-
-        if "error" in token_response:
-            raise Exception(f"Token error: {token_response}")
-
-        credentials = google.oauth2.credentials.Credentials(
-            token=token_response.get("access_token"),
-            refresh_token=token_response.get("refresh_token"),
-            token_uri="https://oauth2.googleapis.com/token",
-            client_id=CLIENT_ID,
-            client_secret=CLIENT_SECRET,
-            scopes=SCOPES,
-        )
-        
-        # Get user email
-        service = build('oauth2', 'v2', credentials=credentials)
-        user_info = service.userinfo().get().execute()
-        
-        # Save to DB
-        user_id = await db.upsert_user(user_info, credentials)
-        
-        # Create session
-        session_id = str(uuid.uuid4())
-        await db.create_session(session_id, user_id)
-        
-        logger.info(f"Successfully authenticated Google user: {user_info.get('email')}")
-        
-        # Redirect back to the frontend dashboard
-        frontend_url = os.getenv("NEXT_PUBLIC_FRONTEND_URL", "http://localhost:3000")
-        redirect_url = f"{frontend_url}/dashboard?auth=success"
-        
-        if state:
-            try:
-                import base64
-                import json
-                state_data = json.loads(base64.b64decode(state).decode())
-                if state_data.get("city"):
-                    redirect_url += f"&city={state_data['city']}"
-                if state_data.get("niche"):
-                    redirect_url += f"&niche={state_data['niche']}"
-            except Exception as e:
-                logger.error(f"Error decoding state: {e}")
-                pass
-                
-        response = RedirectResponse(url=redirect_url)
-        
-        # Set signed cookie
-        signed_session_id = signer.dumps(session_id)
-        response.set_cookie(
-            key="koe_session",
-            value=signed_session_id,
-            httponly=True,
-            secure=True,
-            max_age=30 * 24 * 60 * 60, # 30 days
-            samesite="none"
-        )
-        return response
-        
-    except Exception as e:
-        import traceback
-        with open("oauth_error.log", "w") as f:
-            f.write(traceback.format_exc())
-        logger.error(f"OAuth callback failed: {e}")
-        frontend_url = os.getenv("NEXT_PUBLIC_FRONTEND_URL", "http://localhost:3000")
-        return RedirectResponse(url=f"{frontend_url}/dashboard?auth=error")
-
-@auth_router.get("/status")
-async def get_auth_status(request: Request):
-    """Returns the current connection status for the frontend UI by reading the cookie."""
-    cookie = request.cookies.get("koe_session")
-    if cookie:
-        try:
-            session_id = signer.loads(cookie)
-            user = await db.get_user_by_session(session_id)
-            if user:
-                return {
-                    "connected": True,
-                    "email": user["email"],
-                    "name": user["name"],
-                    "picture": user["picture"]
-                }
-        except Exception as e:
-            logger.debug(f"Invalid session cookie: {e}")
-            
-    return {"connected": False}
-
-from pydantic import BaseModel
-class MeetingRequest(BaseModel):
-    lead_name: str
-    
-@auth_router.post("/schedule-meeting")
-async def schedule_meeting(req: MeetingRequest, request: Request):
-    """Creates a real Google Calendar event for the given lead."""
-    cookie = request.cookies.get("koe_session")
-    if not cookie:
-        return JSONResponse(status_code=401, content={"error": "Not authenticated"})
-        
-    try:
-        session_id = signer.loads(cookie)
-        creds = await db.get_credentials_for_user(session_id)
-        if not creds:
-            return JSONResponse(status_code=401, content={"error": "Credentials not found"})
-            
-        service = build('calendar', 'v3', credentials=creds)
-        
-        # Schedule for day after tomorrow at 10:00 AM local time
-        import datetime
-        day_after_tomorrow = datetime.datetime.now() + datetime.timedelta(days=2)
-        start_time = day_after_tomorrow.replace(hour=10, minute=0, second=0, microsecond=0)
-        end_time = start_time + datetime.timedelta(hours=1)
-        
-        event = {
-            'summary': f'KOE Syndicate × {req.lead_name} — Discovery Call (Demo Mode)',
-            'description': f'Auto-scheduled by KOE Syndicate AI Sales Agent.\nLead: {req.lead_name}',
-            'start': {
-                'dateTime': start_time.strftime('%Y-%m-%dT%H:%M:%S'),
-                'timeZone': 'Asia/Kolkata',
-            },
-            'end': {
-                'dateTime': end_time.strftime('%Y-%m-%dT%H:%M:%S'),
-                'timeZone': 'Asia/Kolkata',
-            },
-        }
-
-        created_event = service.events().insert(calendarId='primary', body=event).execute()
-        return {"success": True, "event_url": created_event.get('htmlLink'), "date": start_time.strftime('%b %d, %Y %I:%M %p')}
-        
-    except Exception as e:
-        logger.error(f"Failed to schedule meeting: {e}")
-        import traceback
-        traceback.print_exc()
-        return JSONResponse(status_code=500, content={"error": str(e)})
-
-@auth_router.post("/disconnect")
-async def disconnect_google(request: Request):
-    """Clears stored tokens."""
-    response = JSONResponse(content={"status": "disconnected"})
-    
-    cookie = request.cookies.get("koe_session")
-    if cookie:
-        try:
-            session_id = signer.loads(cookie)
-            await db.delete_session(session_id)
-        except Exception:
-            pass
-            
-    response.delete_cookie("koe_session")
-    return response
-
-@auth_router.get("/credentials")
-async def get_internal_credentials(request: Request):
-    """
-    Internal endpoint for Lead Manager to grab user credentials.
-    In a full multi-user setup, we would pass the session_id or user_id from the Lead Manager.
-    For this demo, if we don't have a specific cookie (A2A call), we fetch the most recently connected user.
-    """
-    # Only allow localhost for security
-    if request.client.host not in ["127.0.0.1", "localhost", "::1"]:
-        return JSONResponse(status_code=403, content={"error": "Forbidden"})
-        
-    user = None
-    
-    # If the request somehow has the cookie (e.g. proxy)
-    cookie = request.cookies.get("koe_session")
-    if cookie:
-        try:
-            session_id = signer.loads(cookie)
-            user = await db.get_user_by_session(session_id)
-        except Exception:
-            pass
-            
-    # Fallback for A2A background jobs that don't have cookies
-    if not user:
-        user = await db.get_default_user_credentials()
-        
-    if not user:
-        return JSONResponse(status_code=404, content={"error": "No credentials stored"})
-        
-    return {
-        "credentials": user["credentials"],
-        "email": user["email"]
-    }
-
+from .auth_routes import router as auth_router
+from .calendar_routes import router as calendar_router
 app.include_router(auth_router)
-# ── End Google OAuth API ──────────────────────────────────────────────────────
+app.include_router(calendar_router)
 
 async def call_lead_finder_agent_a2a(city: str, session_id: str, **kwargs) -> dict[str, Any]:
     """
@@ -614,7 +363,7 @@ async def call_lead_finder_agent_a2a(city: str, session_id: str, **kwargs) -> di
     }
     
     try:
-        async with httpx.AsyncClient() as http_client:
+        async with httpx.AsyncClient(auth=ServiceAuth("ui-client", "lead-finder"), ) as http_client:
             a2a_client = A2AClient(httpx_client=http_client, url=lead_finder_url)
             
             # Prepare A2A message
@@ -697,7 +446,7 @@ async def call_lead_finder_agent_a2a(city: str, session_id: str, **kwargs) -> di
                         art_part_root = lead_results_artifact.parts[0].root
                         if isinstance(art_part_root, A2ADataPart):
                             result_data = art_part_root.data
-                            business_logger.info(f"Extracted Lead Results: {result_data}")
+                            logger.debug("Sensitive payload omitted")
                             
                             if isinstance(result_data, dict) and "businesses" in result_data:
                                 outcome["success"] = True
@@ -752,7 +501,7 @@ async def call_lead_finder_agent_simple(city: str, session_id: str, **kwargs) ->
     }
     
     try:
-        async with httpx.AsyncClient(timeout=300.0) as client:
+        async with httpx.AsyncClient(auth=ServiceAuth("ui-client", "lead-finder"), timeout=300.0) as client:
             # Try different endpoints that might exist
             endpoints_to_try = [
                 f"{lead_finder_url}/find_leads",
@@ -774,7 +523,7 @@ async def call_lead_finder_agent_simple(city: str, session_id: str, **kwargs) ->
                     
                     if response.status_code == 200:
                         result_data = response.json()
-                        business_logger.info(f"Got response from {endpoint}: {result_data}")
+                        logger.debug("Sensitive payload omitted")
                         
                         # Handle different response formats
                         if isinstance(result_data, dict):
@@ -815,7 +564,7 @@ async def call_lead_finder_agent(city: str, session_id: str, **kwargs) -> dict[s
     Calls the Lead Finder agent - uses A2A if available, otherwise falls back to simple HTTP.
     """
     import os, uuid, asyncio
-    if os.environ.get("MOCK_LEAD_FINDER", "").lower() == "true":
+    if mode() == "demo":
         logging.getLogger("UI_CLIENT").info(f"Using MOCK leads for {city} to save API credits.")
         await asyncio.sleep(2)  # Simulate agent thinking time
         return {
@@ -869,7 +618,7 @@ async def call_sdr_agent_a2a(business_data: dict[str, Any], session_id: str) -> 
     }
     
     try:
-        async with httpx.AsyncClient(timeout=300.0) as http_client:
+        async with httpx.AsyncClient(auth=ServiceAuth("ui-client", "sdr"), timeout=300.0) as http_client:
             a2a_client = A2AClient(httpx_client=http_client, url=sdr_url)
             
             # Prepare A2A message
@@ -951,7 +700,7 @@ async def call_sdr_agent_simple(business_data: dict[str, Any], session_id: str) 
     }
     
     try:
-        async with httpx.AsyncClient(timeout=300.0) as client:
+        async with httpx.AsyncClient(auth=ServiceAuth("ui-client", "sdr"), timeout=300.0) as client:
             # Try different endpoints that might exist
             endpoints_to_try = [
                 # f"{sdr_url}/engage_lead",
@@ -971,7 +720,7 @@ async def call_sdr_agent_simple(business_data: dict[str, Any], session_id: str) 
                     
                     if response.status_code == 200:
                         result_data = response.json()
-                        business_logger.info(f"Got response from SDR at {endpoint}: {result_data}")
+                        logger.debug("Sensitive payload omitted")
                         
                         outcome["success"] = True
                         outcome["message"] = f"SDR agent has started processing {business_data.get('name', 'the business')}"
@@ -1020,7 +769,7 @@ async def call_lead_manager_agent_a2a(query: str, session_id: str) -> dict[str, 
     }
     
     try:
-        async with httpx.AsyncClient() as http_client:
+        async with httpx.AsyncClient(auth=ServiceAuth("ui-client", "lead-manager"), ) as http_client:
             a2a_client = A2AClient(httpx_client=http_client, url=lead_manager_url)
             
             # Prepare A2A message
@@ -1083,7 +832,7 @@ async def call_lead_manager_agent_a2a(query: str, session_id: str) -> dict[str, 
                         art_part_root = lead_management_artifact.parts[0].root
                         if isinstance(art_part_root, A2ADataPart):
                             result_data = art_part_root.data
-                            business_logger.info(f"Lead Manager Result: {result_data}")
+                            logger.debug("Sensitive payload omitted")
                             outcome["success"] = True
                             outcome["message"] = result_data.get("message", "Lead management task completed")
                 
@@ -1120,7 +869,7 @@ async def call_lead_manager_agent_simple(query: str, session_id: str) -> dict[st
     }
     
     try:
-        async with httpx.AsyncClient() as http_client:
+        async with httpx.AsyncClient(auth=ServiceAuth("ui-client", "lead-manager"), ) as http_client:
             payload = {
                 "query": query,
                 "ui_client_url": config.DEFAULT_UI_CLIENT_URL
@@ -1395,26 +1144,11 @@ async def agent_callback(update: AgentUpdate):
 
 @app.get("/", response_class=HTMLResponse)
 async def read_root(request: Request) -> HTMLResponse:
-    """Serves the main page - either input form or dashboard."""
-    if app_state["is_running"] or app_state["businesses"]:
-        # Show dashboard if we have data or process is running
-        return templates.TemplateResponse(
-            request=request,
-            name="dashboard.html",
-            context={
-                "businesses": list(app_state["businesses"].values()),
-                "current_city": app_state["current_city"],
-                "is_running": app_state["is_running"],
-                "agent_updates": app_state["agent_updates"][-20:],  # Last 20 updates
-            }
-        )
-    else:
-        # Show input form
-        return templates.TemplateResponse(
-            request=request,
-            name="index.html",
-            context={}
-        )
+    """Use the dashboard that supplies session credentials and CSRF headers."""
+    return RedirectResponse(
+        os.getenv("NEXT_PUBLIC_FRONTEND_URL", "http://localhost:3000").rstrip("/") + "/dashboard",
+        status_code=303,
+    )
 
 @app.get("/architecture_diagram", response_class=HTMLResponse)
 async def architecture_diagram(request: Request) -> HTMLResponse:
@@ -1498,6 +1232,10 @@ async def send_business_to_sdr(
 ):
     """Send a business to the SDR agent for processing."""
     try:
+        require_action("calls")
+    except SecurityError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=403)
+    try:
         # Check if business exists
         if business_id not in app_state["businesses"]:
             return JSONResponse(
@@ -1570,6 +1308,8 @@ async def reset_state():
 @app.post("/trigger_lead_manager")
 async def trigger_lead_manager():
     """Trigger the Lead Manager agent manually."""
+    if mode() != "live":
+        return JSONResponse({"error": "Live workflow disabled in demo mode"}, status_code=403)
     logger.info("Manual trigger for Lead Manager agent requested")
     
     try:
@@ -1730,14 +1470,14 @@ async def submit_human_input_response(request_id: str, response: HumanInputRespo
     # Get the request first (but don't remove it yet)
     original_request = app_state["human_input_requests"].get(request_id)
     
-    logger.info(f"Human input response submitted for {request_id}: {response.response}")
+    logger.info("Human input response submitted for %s", request_id)
     
     # Try to notify the human creation tool via HTTP callback to SDR agent
     success = False
     agent_url = os.environ.get("SDR_SERVICE_URL", config.DEFAULT_SDR_URL).rstrip("/")
     callback_url = f"{agent_url}/api/human-input/{request_id}"
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with httpx.AsyncClient(auth=ServiceAuth("ui-client", "sdr"), timeout=10.0) as client:
             agent_resp = await client.post(
                 callback_url,
                 json={"url": response.response},
@@ -1780,10 +1520,6 @@ async def health_check():
         "service": "ui_client",
         "version": "1.0.0",
         "timestamp": datetime.now().isoformat(),
-        "active_connections": len(manager.active_connections),
-        "current_city": app_state["current_city"],
-        "is_running": app_state["is_running"],
-        "business_count": len(app_state["businesses"]),
     }
 
 @app.get("/debug/static")
@@ -1829,13 +1565,18 @@ async def get_system_status():
     """
     import os
     import httpx
+
+    if mode() == "demo":
+        return {"ready": False, "lead_finder_ready": False, "mode": "demo",
+                "missing": [], "message": "Demo mode — external actions are disabled",
+                "lead_finder_message": "Simulated lead discovery"}
     
     # ── Check call readiness (ElevenLabs / Twilio) ───────────────────────
     elevenlabs_key = os.getenv("ELEVENLABS_API_KEY", "")
     elevenlabs_agent = os.getenv("ELEVENLABS_AGENT_ID", "")
     twilio_sid = os.getenv("TWILIO_ACCOUNT_SID", "")
     
-    call_ready = bool(elevenlabs_key and elevenlabs_agent) or bool(twilio_sid)
+    call_ready = bool(elevenlabs_key and elevenlabs_agent) and os.getenv("ENABLE_LIVE_CALLS", "false").lower() == "true"
     
     # ── Check lead finder (Google Maps API billing) ───────────────────────
     maps_key = os.getenv("GOOGLE_MAPS_API_KEY", "")

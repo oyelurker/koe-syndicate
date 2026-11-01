@@ -1,3 +1,4 @@
+from common.security import ServiceAuth
 """
 Callbacks for the Lead Manager Agent.
 """
@@ -21,6 +22,9 @@ def send_calendar_notification_to_ui(calendar_request: Dict[str, Any]) -> None:
     Sends a calendar notification to the UI client's /agent_callback endpoint.
     Shows unread calendar requests in the lead-manager-content section.
     """
+    if not isinstance(calendar_request, dict) or calendar_request.get("success") is not True or not calendar_request.get("meeting_id"):
+        logger.info("No confirmed Calendar event to notify")
+        return
     ui_client_url = os.environ.get(
         "UI_CLIENT_SERVICE_URL", config.DEFAULT_UI_CLIENT_URL
     ).rstrip("/")
@@ -37,7 +41,7 @@ def send_calendar_notification_to_ui(calendar_request: Dict[str, Any]) -> None:
     
     logger.info(f"Sending calendar notification to UI endpoint: {callback_endpoint}")
     try:
-        with httpx.Client() as client:
+        with httpx.Client(auth=ServiceAuth("lead-manager", "ui-client"), ) as client:
             response = client.post(callback_endpoint, json=payload, timeout=10.0)
             response.raise_for_status()
             logger.info(f"Successfully posted calendar notification to UI. Status: {response.status_code}")
@@ -83,7 +87,7 @@ def send_hot_lead_to_ui(email_data: Dict[str, Any]):
 
     logger.info(f"Sending hot lead notification to UI endpoint: {callback_endpoint} for email: {sender_email}")
     try:
-        with httpx.Client() as client:
+        with httpx.Client(auth=ServiceAuth("lead-manager", "ui-client"), ) as client:
             response = client.post(callback_endpoint, json=payload, timeout=10.0)
             response.raise_for_status()
             logger.info(f"Successfully posted hot lead notification to UI. Status: {response.status_code}")
@@ -101,7 +105,7 @@ async def post_lead_manager_callback(callback_context: CallbackContext) -> Optio
     logger.info(f"[Callback] Exiting agent: {agent_name}. Processing final result.")
 
     context_state = callback_context.state.to_dict()
-    logger.info(f"[Callback] Current callback_context.state: {context_state}")
+    logger.debug("Sensitive payload omitted")
     
     # Helper function to safely parse a string that might be markdown-wrapped JSON
     def safe_json_parse(value: any, key_name: str) -> any:
@@ -119,9 +123,9 @@ async def post_lead_manager_callback(callback_context: CallbackContext) -> Optio
             logger.warning(f"[Callback] Could not parse '{key_name}' as JSON. Using raw string value.")
             return value # Return the original string if parsing fails
 
-    notification_data = safe_json_parse(context_state.get('calendar_request'), 'notification_result')
+    notification_data = safe_json_parse(context_state.get('meeting_result'), 'meeting_result')
     
-    if notification_data is None and 'notification_result' in context_state:
+    if not isinstance(notification_data, dict) or notification_data.get("success") is not True or not notification_data.get("meeting_id"):
         logger.warning(f"[Callback] No notification data found in state for agent: {agent_name}")
         return None
 

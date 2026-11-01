@@ -1,4 +1,5 @@
 import re
+from common.security import service_url
 import json
 import logging
 from typing import Any
@@ -25,16 +26,10 @@ logger = logging.getLogger(__name__)
 root_path = Path.cwd()
 log_file = root_path / "lead_finder/lead_finder_agent.log"
 def log_to_file(message: str):
-    """Write log message to file with timestamp"""
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
-    with open(log_file, 'a', encoding='utf-8') as f:
-        f.write('\n')
-        f.write(f"[{timestamp}] {message}\n")
-        f.write('\n')
+    """Sensitive agent payloads are not written to ad-hoc files."""
+    return None
 
 # Clear previous logs and start fresh for this call
-with open(log_file, 'w', encoding='utf-8') as f:
-    f.write(f"=== LEAD FINDER AGENT's LOG - {datetime.now().isoformat()} ===\n\n")
 
 class LeadFinderAgentExecutor(AgentExecutor):
     """Executes the Lead Finder ADK agent logic in response to A2A requests."""
@@ -52,7 +47,7 @@ class LeadFinderAgentExecutor(AgentExecutor):
     async def execute(self, context: RequestContext, event_queue: EventQueue):
         task_updater = TaskUpdater(event_queue, context.task_id, context.context_id)
         
-        logger.info(f"DEBUG: Context message parts: {[str(part) for part in context.message.parts]}")
+        logger.info("Received Lead Finder request")
 
         if not context.current_task:
             task_updater.submit(message=context.message)
@@ -68,7 +63,7 @@ class LeadFinderAgentExecutor(AgentExecutor):
         # Extract city from context.message - IMPROVED EXTRACTION
         city_name: str | None = None
         niche_name: str | None = None
-        ui_client_url = DEFAULT_UI_CLIENT_URL
+        ui_client_url = service_url("ui-client")
 
         if context.message and context.message.parts:
             for part_union in context.message.parts:
@@ -85,8 +80,6 @@ class LeadFinderAgentExecutor(AgentExecutor):
                     if "niche" in part.data:
                         niche_name = part.data["niche"]
                     
-                    if "ui_client_url" in part.data:
-                        ui_client_url = part.data["ui_client_url"]
 
         if city_name is None:
             logger.error(f"Task {context.task_id}: Missing city name in input")

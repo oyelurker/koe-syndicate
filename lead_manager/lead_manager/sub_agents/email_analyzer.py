@@ -9,7 +9,6 @@ from typing import AsyncGenerator, Dict, Any, Optional
 from typing_extensions import override
 
 # --- FIX 1, PART A: Move imports to the top of the file ---
-import google.generativeai as genai
 from google.adk.agents import BaseAgent
 from google.adk.agents.invocation_context import InvocationContext
 from google.adk.events import Event
@@ -154,7 +153,7 @@ class EmailAnalyzer(BaseAgent):
                         logger.error(f"[{self.name}] Failed to send hot lead notification to UI: {ui_error}")
                     
                     calendar_request_data = await self._is_meeting_request_llm(email_data, ctx)
-                    logger.info(f"[{self.name}]✅ LLM analysis result for {sender_email}: {calendar_request_data}")
+                    logger.info("[%s] Meeting request analysis completed", self.name)
                     if calendar_request_data.get("status") == "meeting_request":
                         logger.info(f"[{self.name}] Meeting request found from hot lead: {sender_email}")
 

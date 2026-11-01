@@ -1,3 +1,4 @@
+from common.security import ServiceAuth
 # In lead_finder/callbacks.py
 
 import json
@@ -65,7 +66,7 @@ def send_update_to_ui(business_data: dict):
 
     logger.info(f"Sending POST to UI endpoint: {callback_endpoint} for business: {data_for_ui.get('name')}")
     try:
-        with httpx.Client() as client:
+        with httpx.Client(auth=ServiceAuth("lead-finder", "ui-client"), ) as client:
             response = client.post(callback_endpoint, json=payload, timeout=10.0)
             response.raise_for_status()
             logger.info(f"Successfully posted update for {data_for_ui.get('name')} to UI. Status: {response.status_code}")
@@ -82,7 +83,7 @@ async def post_results_callback(callback_context: CallbackContext) -> Optional[g
 
     # Access the state directly
     context_state = callback_context.state.to_dict()
-    print(f"[Callback] Current callback_context.state: {context_state}")
+    pass  # Sensitive payload omitted
 
     # Check if 'final_merged_leads' key exists in the state
     if 'final_merged_leads' in context_state:
@@ -98,7 +99,7 @@ async def post_results_callback(callback_context: CallbackContext) -> Optional[g
                     final_businesses = parsed_data
                     logger.info(f"[Callback] Successfully extracted {len(final_businesses)} businesses from callback_context.state.")
                 else:
-                    logger.warning(f"[Callback] Extracted JSON from state is not a list: {parsed_data}")
+                    logger.warning("[Callback] Extracted JSON from state is not a list")
             except json.JSONDecodeError as e:
                 logger.error(f"[Callback] Failed to parse JSON from callback_context.state: {e}")
         else:
@@ -110,7 +111,7 @@ async def post_results_callback(callback_context: CallbackContext) -> Optional[g
     if not final_businesses:
         logger.warning("[Callback] No businesses found for UI update. Check MergerAgent's output_key and state propagation.")
         # For deeper debugging if needed, log the full state
-        logger.warning(f"Full callback_context.state.to_dict(): {context_state}")
+        logger.debug("Sensitive payload omitted")
         return None
 
     for biz in final_businesses:

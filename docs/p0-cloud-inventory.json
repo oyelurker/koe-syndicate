@@ -1,0 +1,34 @@
+[
+  {
+    "service": "lead-finder",
+    "publicInvoker": true,
+    "ingress": "all",
+    "image": "[historical repository redacted]/lead-finder:latest",
+    "imageRepositoryRedacted": true,
+    "revision": "lead-finder-00001-gwf"
+  },
+  {
+    "service": "lead-manager",
+    "publicInvoker": true,
+    "ingress": "all",
+    "image": "[historical repository redacted]/lead-manager:latest",
+    "imageRepositoryRedacted": true,
+    "revision": "lead-manager-00001-qwm"
+  },
+  {
+    "service": "sdr",
+    "publicInvoker": true,
+    "ingress": "all",
+    "image": "[historical repository redacted]/sdr:latest",
+    "imageRepositoryRedacted": true,
+    "revision": "sdr-00001-6sd"
+  },
+  {
+    "service": "ui-client",
+    "publicInvoker": true,
+    "ingress": "all",
+    "image": "[historical repository redacted]/ui-client:latest",
+    "imageRepositoryRedacted": true,
+    "revision": "ui-client-00002-lzp"
+  }
+]

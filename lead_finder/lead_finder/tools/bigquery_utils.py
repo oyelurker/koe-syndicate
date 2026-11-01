@@ -12,6 +12,23 @@ from ..config import PROJECT, DATASET_ID, TABLE_ID
 
 logger = logging.getLogger(__name__)
 
+
+def _query_filters(city, category, min_rating, lead_status, limit):
+    if type(limit) is not int or not 1 <= limit <= 1000:
+        raise ValueError("limit must be an integer between 1 and 1000")
+    if min_rating is not None and (isinstance(min_rating, bool) or not 0 <= min_rating <= 5):
+        raise ValueError("min_rating must be between 0 and 5")
+    conditions = []
+    parameters = [bigquery.ScalarQueryParameter("limit", "INT64", limit)]
+    for column, value in (("city", city), ("category", category), ("lead_status", lead_status)):
+        if value is not None:
+            conditions.append(f"{column} = @{column}")
+            parameters.append(bigquery.ScalarQueryParameter(column, "STRING", value))
+    if min_rating is not None:
+        conditions.append("rating >= @min_rating")
+        parameters.append(bigquery.ScalarQueryParameter("min_rating", "FLOAT64", min_rating))
+    return " AND ".join(conditions) or "1=1", bigquery.QueryJobConfig(query_parameters=parameters)
+
 class BigQueryClient:
     """BigQuery client wrapper for lead data operations."""
     
@@ -275,15 +292,17 @@ class BigQueryClient:
         
         try:
             # Create a query to check for existing place_ids
-            place_ids_str = "', '".join(place_ids)
             query = f"""
                 SELECT DISTINCT place_id 
                 FROM `{PROJECT}.{DATASET_ID}.{TABLE_ID}` 
-                WHERE place_id IN ('{place_ids_str}')
+                WHERE place_id IN UNNEST(@place_ids)
             """
+            job_config = bigquery.QueryJobConfig(query_parameters=[
+                bigquery.ArrayQueryParameter("place_ids", "STRING", place_ids)
+            ])
             
             def _run_query():
-                return list(self.client.query(query))
+                return list(self.client.query(query, job_config=job_config))
             
             results = await asyncio.to_thread(_run_query)
             return {row.place_id for row in results}
@@ -313,33 +332,22 @@ class BigQueryClient:
         Returns:
             Dictionary with query results
         """
+        where_clause, job_config = _query_filters(city, category, min_rating, lead_status, limit)
         if not self.client:
             return {"status": "error", "message": "BigQuery client not available"}
-        
+
         try:
-            # Build WHERE clause
-            where_conditions = []
-            if city:
-                where_conditions.append(f"city = '{city}'")
-            if category:
-                where_conditions.append(f"category = '{category}'")
-            if min_rating:
-                where_conditions.append(f"rating >= {min_rating}")
-            if lead_status:
-                where_conditions.append(f"lead_status = '{lead_status}'")
-            
-            where_clause = " AND ".join(where_conditions) if where_conditions else "1=1"
             
             query = f"""
                 SELECT *
                 FROM `{PROJECT}.{DATASET_ID}.{TABLE_ID}`
                 WHERE {where_clause}
                 ORDER BY created_at DESC
-                LIMIT {limit}
+                LIMIT @limit
             """
             
             def _run_query():
-                return [dict(row) for row in self.client.query(query)]
+                return [dict(row) for row in self.client.query(query, job_config=job_config)]
             
             results = await asyncio.to_thread(_run_query)
             
@@ -417,7 +425,15 @@ class BigQueryClient:
             }
 
 # Global client instance
-_bigquery_client = BigQueryClient()
+_bigquery_client = None
+
+
+def _get_bigquery_client():
+    """Do not contact Google or create datasets while importing the module."""
+    global _bigquery_client
+    if _bigquery_client is None:
+        _bigquery_client = BigQueryClient()
+    return _bigquery_client
 
 async def bigquery_upload(data: List[Dict[str, Any]], city: str = "", search_type: str = "general") -> Dict[str, Any]:
     """
@@ -437,7 +453,7 @@ async def bigquery_upload(data: List[Dict[str, Any]], city: str = "", search_typ
         
         logger.info(f"Starting BigQuery upload for {len(data)} businesses in {city}")
         
-        result = await _bigquery_client.upload_businesses(data, city, search_type)
+        result = await _get_bigquery_client().upload_businesses(data, city, search_type)
         
         # Log the results
         if result["status"] == "success":
@@ -478,7 +494,7 @@ async def bigquery_query_leads(
     try:
         logger.info(f"Querying leads: city={city}, category={category}, min_rating={min_rating}")
         
-        result = await _bigquery_client.query_businesses(
+        result = await _get_bigquery_client().query_businesses(
             city=city,
             category=category,
             min_rating=min_rating,
@@ -618,30 +634,14 @@ async def bigquery_query_no_website_leads(
     """
     Query businesses from business_leads_no_websites table with filters.
     """
+    where_clause, job_config = _query_filters(city, category, min_rating, lead_status, limit)
     client = BigQueryClient()
     if not client.client:
         return {"status": "error", "message": "BigQuery client not available"}
-    table_ref = ensure_no_website_table_exists(client.client, client.dataset_ref)
-    # Build WHERE clause
-    where_conditions = []
-    if city:
-        where_conditions.append(f"city = '{city}'")
-    if category:
-        where_conditions.append(f"category = '{category}'")
-    if min_rating:
-        where_conditions.append(f"rating >= {min_rating}")
-    if lead_status:
-        where_conditions.append(f"lead_status = '{lead_status}'")
-    where_clause = " AND ".join(where_conditions) if where_conditions else "1=1"
-    query = f"""
-        SELECT *
-        FROM `{PROJECT}.{DATASET_ID}.{NO_WEBSITE_TABLE_ID}`
-        WHERE {where_clause}
-        ORDER BY created_at DESC
-        LIMIT {limit}
-    """
+    ensure_no_website_table_exists(client.client, client.dataset_ref)
+    query = f"SELECT * FROM `{PROJECT}.{DATASET_ID}.{NO_WEBSITE_TABLE_ID}` WHERE {where_clause} ORDER BY created_at DESC LIMIT @limit"
     def _run_query():
-        return [dict(row) for row in client.client.query(query)]
+        return [dict(row) for row in client.client.query(query, job_config=job_config)]
     import asyncio
     results = await asyncio.to_thread(_run_query)
     return {

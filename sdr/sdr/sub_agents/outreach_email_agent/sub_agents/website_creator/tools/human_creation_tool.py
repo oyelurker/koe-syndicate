@@ -1,3 +1,4 @@
+from common.security import ServiceAuth
 "This module provides a tool for human creation of websites based on a given prompt."
 
 import asyncio
@@ -87,7 +88,7 @@ async def send_ui_notification(request_id: str, prompt: str, ui_endpoint: Option
                 "timestamp": datetime.now().isoformat()
             }
             
-            async with httpx.AsyncClient(timeout=10.0) as client:
+            async with httpx.AsyncClient(auth=ServiceAuth("sdr", "ui-client"), timeout=10.0) as client:
                 response = await client.post(
                     f"{ui_endpoint}/api/human-input",
                     json=payload,

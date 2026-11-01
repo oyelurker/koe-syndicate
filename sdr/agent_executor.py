@@ -1,3 +1,4 @@
+from common.security import ServiceAuth, mode, service_url
 from datetime import datetime
 import json
 import logging
@@ -24,16 +25,10 @@ logger = logging.getLogger(__name__)
 root_path = Path.cwd()
 log_file = root_path / "sdr/sdr_agent.log"
 def log_to_file(message: str):
-    """Write log message to file with timestamp"""
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
-    with open(log_file, 'a', encoding='utf-8') as f:
-        f.write('\n')
-        f.write(f"[{timestamp}] {message}\n")
-        f.write('\n')
+    """Sensitive agent payloads are not written to ad-hoc files."""
+    return None
 
 # Clear previous logs and start fresh for this call
-with open(log_file, 'w', encoding='utf-8') as f:
-    f.write(f"=== SDR AGENT's LOG - {datetime.now().isoformat()} ===\n\n")
 
 class SDRAgentExecutor(AgentExecutor):
     """Executes the SDR ADK agent logic in response to A2A requests."""
@@ -53,7 +48,7 @@ class SDRAgentExecutor(AgentExecutor):
     async def execute(self, context: RequestContext, event_queue: EventQueue):
         task_updater = TaskUpdater(event_queue, context.task_id, context.context_id)
         
-        logger.info(f"DEBUG: Context message parts: {[str(part) for part in context.message.parts]}")
+        logger.info("Received SDR request")
 
         if not context.current_task:
             task_updater.submit(message=context.message)
@@ -68,7 +63,7 @@ class SDRAgentExecutor(AgentExecutor):
 
         # Extract business lead data from context.message
         business_data: dict | None = None
-        ui_client_url = DEFAULT_UI_CLIENT_URL
+        ui_client_url = service_url("ui-client")
 
         if context.message and context.message.parts:
             for part_union in context.message.parts:
@@ -86,8 +81,6 @@ class SDRAgentExecutor(AgentExecutor):
                         if "name" in part.data and ("phone" in part.data or "email" in part.data):
                             business_data = part.data
                     
-                    if "ui_client_url" in part.data:
-                        ui_client_url = part.data["ui_client_url"]
 
         if business_data is None:
             logger.error(f"Task {context.task_id}: Missing business lead data in input")
@@ -200,7 +193,7 @@ class SDRAgentExecutor(AgentExecutor):
             
             import os
             import asyncio
-            if os.environ.get("MOCK_SDR", "").lower() == "true":
+            if mode() == "demo":
                 logger.info(f"Task {context.task_id}: Using MOCK SDR Mode to save API credits")
                 await asyncio.sleep(1)
                 task_updater.update_status(TaskState.working, message=task_updater.new_agent_message(parts=[Part(root=DataPart(data={"text": f"MOCK: Analyzing digital footprint for {business_name}..."}))]))
@@ -251,7 +244,7 @@ class SDRAgentExecutor(AgentExecutor):
                 log_to_file(log_entry)
                 # Collect and log the raw event
                 all_events.append(event)
-                logger.info(f"Task {context.task_id}: ADK Event: {event}")
+                logger.debug("Sensitive payload omitted")
                 # Stream intermediate agent messages back to the client
                 # so that human-in-the-loop prompts (e.g., website creation) are surfaced
                 if event.content and event.content.parts:
@@ -344,7 +337,7 @@ class SDRAgentExecutor(AgentExecutor):
                 logger.info(f"Task {context.task_id}: Added phone call result to final output")
 
             # Log the complete final result
-            logger.info(f"Task {context.task_id}: Complete final result: {json.dumps(final_result, indent=2)}")
+            logger.debug("Sensitive payload omitted")
             log_to_file(f"Task {context.task_id}: Complete final result: {json.dumps(final_result, indent=2)}")
 
             task_updater.add_artifact(
@@ -367,7 +360,7 @@ class SDRAgentExecutor(AgentExecutor):
             
             async def send_error_to_ui():
                 try:
-                    async with httpx.AsyncClient() as client:
+                    async with httpx.AsyncClient(auth=ServiceAuth("sdr", "ui-client"), ) as client:
                         payload = {
                             "agent_type": "sdr",
                             "business_id": business_data.get("id", ""),

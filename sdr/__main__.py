@@ -1,3 +1,4 @@
+from common.security import ServiceMiddleware
 #!/usr/bin/env python3
 """SDR Agent Service"""
 import logging
@@ -178,12 +179,10 @@ try:
     )
 
 except Exception as e:
-    logger.error(f"FATAL: Failed to build the SDR application object. {e}", exc_info=True)
-    # Create a dummy app that reports the error so the container doesn't crash silently
-    app = Starlette(debug=True)
-    @app.route("/health")
-    async def error_app(request: Request):
-        return JSONResponse({"status": "error", "message": "Application failed to initialize", "error": str(e)}, status_code=500)
+    logger.error("Failed to initialize the SDR application", exc_info=True)
+    raise RuntimeError("SDR startup failed; refusing to serve an incomplete application") from e
+
+app = ServiceMiddleware(app, "sdr", {"ui-client"})
 
 # --- The `main` function is now only a local development runner ---
 

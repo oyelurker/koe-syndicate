@@ -31,7 +31,8 @@ for SERVICE in "${SERVICES[@]}"; do
     YAML_FILE="cloudbuild_${SERVICE/-/_}.yaml"
     
     if [ ! -f "$YAML_FILE" ]; then
-        echo "Warning: $YAML_FILE not found, skipping build."
+        echo "Build configuration missing: $YAML_FILE; refusing to deploy an unverified image." >&2
+        exit 1
     else
         echo "Building image for $SERVICE..."
         gcloud builds submit --config="$YAML_FILE" .
@@ -40,15 +41,17 @@ for SERVICE in "${SERVICES[@]}"; do
     IMAGE="${DOCKER_REPO}/${SERVICE}:latest"
     
     echo "Deploying $SERVICE to Cloud Run..."
-    gcloud run deploy "${SERVICE}-service" \
+    gcloud run deploy "$SERVICE" \
         --image="$IMAGE" \
         --platform managed \
         --region "$REGION" \
         --project "$PROJECT_ID" \
-        --allow-unauthenticated \
-        --set-env-vars="PROJECT_ID=$PROJECT_ID,REGION=$REGION"
+        --no-allow-unauthenticated \
+        --invoker-iam-check \
+        --ingress internal \
+        --max-instances 1 \
+        --update-env-vars="PROJECT_ID=$PROJECT_ID,REGION=$REGION,KOE_MODE=demo,ENABLE_LIVE_CALLS=false,ENABLE_LIVE_EMAIL=false,ENABLE_LIVE_CALENDAR=false"
 done
 
 echo "Deployment step finished."
-echo "Linking services together with updated environment variables..."
-./update_deployed_constants.sh
+echo "Configure authenticated service URLs and persistent storage before any live rollout; see docs/P0-SECURITY.md."

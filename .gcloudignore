@@ -7,3 +7,24 @@ venv/
 .DS_Store
 .env
 *.log
+# Security and local build context
+.git/
+.secrets/
+.runtime/
+.audit-venv/
+.env*
+!.env.example
+**/.env*
+!**/.env.example
+*.db
+*.db-*
+*-service.json
+**/node_modules/
+**/.next/
+**/__pycache__/
+*.log
+*debug*.json
+*_upload_*.json
+lead_manager_meeting_*.json
+*.pptx
+*.mp4

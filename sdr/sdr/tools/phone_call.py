@@ -1,3 +1,4 @@
+from common.security import require_action
 """
 Phone call tool for outreach activities using ElevenLabs Conversational AI.
 """
@@ -81,6 +82,7 @@ async def _make_call(
     Place a test outbound call via ElevenLabs Conversational-AI → Twilio
     and return its transcript & metadata.
     """
+    require_action("calls")
     result = {
         "status": "initializing",
         "transcript": [],
@@ -189,6 +191,7 @@ async def phone_call(business_data: dict[str, Any], proposal: str) -> dict[str, 
     Returns:
         A dictionary containing test call results
     """
+    require_action("calls")
     
     logger.info("⚒️ [TOOL] 📞 Starting phone call tool...")
     
@@ -277,20 +280,10 @@ async def phone_call(business_data: dict[str, Any], proposal: str) -> dict[str, 
     
     # return mock_result 
 
-    # Initialize logging to file
-    root_path = Path.cwd()
-    log_file = root_path / "phone_call_tool_usage.log"
-
     def log_to_file(message: str):
-        """Write log message to file with timestamp"""
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
-        with open(log_file, 'a', encoding='utf-8') as f:
-            f.write(f"[{timestamp}] {message}\n")
-    
-    # Clear previous logs and start fresh for this call
-    with open(log_file, 'w', encoding='utf-8') as f:
-        f.write(f"=== PHONE CALL TOOL USAGE LOG - {datetime.now().isoformat()} ===\n\n")
-    
+        # Do not persist full proposals, contact details or transcripts in logs.
+        return None
+
     log_to_file("=" * 80)
     log_to_file("🔍 PHONE CALL FUNCTION DEBUG START")
     log_to_file("=" * 80)
@@ -309,11 +302,10 @@ async def phone_call(business_data: dict[str, Any], proposal: str) -> dict[str, 
         log_to_file(f"   {var}: {status}")
     
     missing_vars = [var for var, status in env_vars.items() if "❌" in status]
-    use_mock = False
     if missing_vars:
         log_to_file(f"\n❌ Missing environment variables: {', '.join(missing_vars)}")
         log_to_file("Falling back to MOCK call mode.")
-        use_mock = True
+        return {"status": "error", "error": "Call provider configuration is incomplete"}
     
     # Make the call
     log_to_file("⏳ This may take a few minutes depending on call duration...")
@@ -349,45 +341,17 @@ async def phone_call(business_data: dict[str, Any], proposal: str) -> dict[str, 
 
         start_time = time.time()
         
-        if use_mock:
-            log_to_file("🎭 EXECUTING MOCK CALL...")
-            time.sleep(3) # simulate call time
-            result = {
-                "status": "completed",
-                "conversation_id": "mock_conv_12345",
-                "transcript": [
-                    {"role": "agent", "message": FIRST_MESSAGE},
-                    {"role": "user", "message": "Yes, I have a minute. What quick wins?"},
-                    {"role": "agent", "message": "I noticed your website takes a while to load on mobile and your SEO ranking for local searches could be improved. We specialize in exactly this. Would you be open to a brief 15-minute meeting next week?"},
-                    {"role": "user", "message": "Sure, that sounds interesting. Next Tuesday at 2 PM?"},
-                    {"role": "agent", "message": "Perfect! I will schedule that in our calendar for Tuesday at 2 PM. Thanks for your time!"}
-                ]
-            }
-        else:
-            result = await _make_call(
-                   to_number=normalized_number,
-                   system_prompt=SYSTEM_PROMPT,
-                   first_message=FIRST_MESSAGE,
-                   poll_interval=2.0
-            )
-            
+        result = await _make_call(
+            to_number=normalized_number, system_prompt=SYSTEM_PROMPT,
+            first_message=FIRST_MESSAGE, poll_interval=2.0,
+        )
+
         end_time = time.time()
         
         log_to_file(" - - - - - ")
         log_to_file(f"📞 Call completed in {end_time - start_time:.2f} seconds")
         log_to_file(f"📜 Transcript: {json.dumps(result, indent=2, ensure_ascii=False)}")
         
-    
-    # Write comprehensive debug file
-    debug_file = root_path / "phone_call_debug_detailed.json"
-    
-    try:
-        with open(debug_file, 'w', encoding='utf-8') as f:
-            json.dump(debug_info, f, indent=2, ensure_ascii=False)
-        log_to_file("")
-        log_to_file(f"💾 Debug info written to: {debug_file}")
-    except Exception as e:
-        log_to_file(f"❌ Failed to write debug file: {e}")
     
     return result
 

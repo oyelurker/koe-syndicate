@@ -1,4 +1,5 @@
 import json
+from common.security import service_url
 import logging
 from typing import Any
 from datetime import datetime
@@ -23,16 +24,10 @@ logger = logging.getLogger(__name__)
 root_path = Path.cwd()
 log_file = root_path / "lead_finder/lead_finder_agent.log"
 def log_to_file(message: str):
-    """Write log message to file with timestamp"""
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
-    with open(log_file, 'a', encoding='utf-8') as f:
-        f.write('\n')
-        f.write(f"[{timestamp}] {message}\n")
-        f.write('\n')
+    """Sensitive agent payloads are not written to ad-hoc files."""
+    return None
 
 # Clear previous logs and start fresh for this call
-with open(log_file, 'w', encoding='utf-8') as f:
-    f.write(f"=== LEAD FINDER AGENT's LOG - {datetime.now().isoformat()} ===\n\n")
     
 class LeadManagerAgentExecutor(AgentExecutor):
     """Executes the Lead Manager ADK agent logic in response to A2A requests."""
@@ -64,7 +59,7 @@ class LeadManagerAgentExecutor(AgentExecutor):
 
         # Extract search query from context.message
         search_query: str | None = None
-        ui_client_url = "http://localhost:8000"  # Default UI client URL
+        ui_client_url = service_url("ui-client")
 
         if context.message and context.message.parts:
             for part_union in context.message.parts:
@@ -72,8 +67,6 @@ class LeadManagerAgentExecutor(AgentExecutor):
                 if isinstance(part, DataPart):
                     if "query" in part.data:
                         search_query = part.data["query"]
-                    if "ui_client_url" in part.data:
-                        ui_client_url = part.data["ui_client_url"]
 
         if search_query is None:
             logger.error(f"Task {context.task_id}: Missing search query in input")

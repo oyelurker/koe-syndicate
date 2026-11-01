@@ -1,3 +1,5 @@
+import httpx
+from common.security import ServiceAuth, Execution, owner_email, mode, service_url
 """
 Gmail Pub/Sub Pull Listener Service
 ==================================
@@ -28,7 +30,7 @@ PROJECT_ID = os.getenv("PROJECT_ID")
 SUBSCRIPTION_NAME = os.getenv("SUBSCRIPTION_NAME", "gmail-notifications-pull")
 SALES_EMAIL = os.getenv("SALES_EMAIL")
 SERVICE_ACCOUNT_FILE = os.getenv("SERVICE_ACCOUNT_FILE", ".secrets/koe-syndicate-service.json")
-LEAD_MANAGER_URL = os.getenv("LEAD_MANAGER_URL", config.DEFAULT_LEAD_MANAGER_URL).rstrip("/")
+LEAD_MANAGER_URL = service_url("lead-manager")
 CRON_INTERVAL = 30  # seconds
 
 # Set up logging
@@ -200,9 +202,10 @@ class GmailPubSubListener:
         }
         
         try:
-            response = requests.post(
+            response = httpx.post(
                 f"{self.lead_manager_url}/agents/lead-manager-agent/execute",
                 json=agent_payload,
+                auth=ServiceAuth("gmail-listener", "lead-manager", Execution(owner_email(), mode())),
                 headers={"Content-Type": "application/json"},
                 timeout=5
             )

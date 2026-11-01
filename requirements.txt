@@ -4,6 +4,3 @@
 -r sdr/requirements.txt
 -r ui_client/requirements.txt
 -r gmail_pubsub_listener/requirements.txt
-
-# Development/Testing requirements
--r requirements-dev.txt

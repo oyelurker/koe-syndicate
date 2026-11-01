@@ -4,11 +4,13 @@ import os
 from pathlib import Path
 from typing import Optional
 from google.oauth2.credentials import Credentials
+from .token_crypto import encrypt, decrypt, cipher, PREFIX
 
 DB_PATH = Path(os.getenv("DB_PATH", "tokens.db"))
 
 async def init_db():
     """Initializes the database schema."""
+    cipher()  # Fail before touching stored credentials if key configuration is invalid.
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("""
             CREATE TABLE IF NOT EXISTS users (
@@ -34,6 +36,13 @@ async def init_db():
                 FOREIGN KEY(user_id) REFERENCES users(id)
             )
         """)
+        # Encrypt existing plaintext rows transactionally. Keep this key stable;
+        # deleting or changing it makes previously encrypted credentials unreadable.
+        async with db.execute("SELECT id, access_token, refresh_token, client_secret FROM users") as cursor:
+            rows = await cursor.fetchall()
+        for row in rows:
+            values = [v if v is None or v.startswith(PREFIX) else encrypt(v) for v in row[1:]]
+            await db.execute("UPDATE users SET access_token=?, refresh_token=?, client_secret=? WHERE id=?", (*values, row[0]))
         await db.commit()
 
 async def upsert_user(user_info, credentials) -> str:
@@ -55,7 +64,7 @@ async def upsert_user(user_info, credentials) -> str:
                 name=excluded.name,
                 picture_url=excluded.picture_url,
                 access_token=excluded.access_token,
-                refresh_token=excluded.refresh_token,
+                refresh_token=COALESCE(excluded.refresh_token, users.refresh_token),
                 token_uri=excluded.token_uri,
                 client_id=excluded.client_id,
                 client_secret=excluded.client_secret,
@@ -63,8 +72,8 @@ async def upsert_user(user_info, credentials) -> str:
                 updated_at=CURRENT_TIMESTAMP
         """, (
             user_id, email, name, picture,
-            credentials.token, credentials.refresh_token, credentials.token_uri,
-            credentials.client_id, credentials.client_secret, scopes_json
+            encrypt(credentials.token), encrypt(credentials.refresh_token), credentials.token_uri,
+            credentials.client_id, encrypt(credentials.client_secret), scopes_json
         ))
         
         # Get the ID (might be different if we matched on email)
@@ -113,11 +122,11 @@ async def get_user_by_session(session_id: str):
                     "name": row[2],
                     "picture": row[3],
                     "credentials": {
-                        "token": row[4],
-                        "refresh_token": row[5],
+                        "token": decrypt(row[4]),
+                        "refresh_token": decrypt(row[5]),
                         "token_uri": row[6],
                         "client_id": row[7],
-                        "client_secret": row[8],
+                        "client_secret": decrypt(row[8]),
                         "scopes": scopes
                     }
                 }
@@ -144,33 +153,18 @@ async def delete_session(session_id: str):
         await db.execute("DELETE FROM sessions WHERE session_id = ?", (session_id,))
         await db.commit()
 
-async def get_default_user_credentials():
-    """
-    Fallback for A2A communication where no session is passed. 
-    Returns the most recently updated user's credentials.
-    """
+async def disconnect_user(user_id: str):
     async with aiosqlite.connect(DB_PATH) as db:
-        # check if table exists first just in case
-        try:
-            async with db.execute("""
-                SELECT email, access_token, refresh_token, token_uri, client_id, client_secret, scopes
-                FROM users
-                ORDER BY updated_at DESC LIMIT 1
-            """) as cursor:
-                row = await cursor.fetchone()
-                if row:
-                    scopes = json.loads(row[6]) if row[6] else []
-                    return {
-                        "email": row[0],
-                        "credentials": {
-                            "token": row[1],
-                            "refresh_token": row[2],
-                            "token_uri": row[3],
-                            "client_id": row[4],
-                            "client_secret": row[5],
-                            "scopes": scopes
-                        }
-                    }
-        except aiosqlite.OperationalError:
-            pass # tables might not be created yet
+        await db.execute("DELETE FROM sessions WHERE user_id = ?", (user_id,))
+        await db.execute("DELETE FROM users WHERE id = ?", (user_id,))
+        await db.commit()
+
+async def credentials_for_owner(email: str):
+    from common.security import require_owner
+    require_owner(email)
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("SELECT access_token, refresh_token, token_uri, client_id, client_secret, scopes FROM users WHERE lower(email) = ?", (email.lower(),)) as cursor:
+            row = await cursor.fetchone()
+    if not row:
         return None
+    return Credentials(token=decrypt(row[0]), refresh_token=decrypt(row[1]), token_uri=row[2], client_id=row[3], client_secret=decrypt(row[4]), scopes=json.loads(row[5]))

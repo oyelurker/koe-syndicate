@@ -4,7 +4,7 @@ $ErrorActionPreference = "Stop"
 if (Test-Path .env) {
     Get-Content .env | Where-Object { $_ -match "^[^#]*=" } | ForEach-Object {
         $name, $value = $_.Split('=', 2)
-        [Environment]::SetEnvironmentVariable($name.Trim(), $value.Trim(), "Process")
+        [Environment]::SetEnvironmentVariable($name.Trim(), $value.Trim().Trim('"').Trim("'"), "Process")
     }
 }
 
@@ -28,22 +28,27 @@ foreach ($SERVICE in $SERVICES) {
     $YAML_FILE = "cloudbuild_$($SERVICE.Replace('-', '_')).yaml"
     
     if (-Not (Test-Path $YAML_FILE)) {
-        Write-Host "Warning: $YAML_FILE not found, skipping build." -ForegroundColor Red
+        throw "Build configuration missing: $YAML_FILE; refusing to deploy an unverified image"
     } else {
         Write-Host "Building image for $SERVICE..." -ForegroundColor Cyan
         gcloud builds submit --config="$YAML_FILE" .
+        if ($LASTEXITCODE -ne 0) { throw "Build failed for $SERVICE" }
     }
     
     $IMAGE = "${DOCKER_REPO}/${SERVICE}:latest"
     
     Write-Host "Deploying $SERVICE to Cloud Run..." -ForegroundColor Cyan
-    gcloud run deploy "${SERVICE}-service" `
+    gcloud run deploy "$SERVICE" `
         --image="$IMAGE" `
         --platform managed `
         --region "$REGION" `
         --project "$PROJECT_ID" `
-        --allow-unauthenticated `
-        --set-env-vars="PROJECT_ID=$PROJECT_ID,REGION=$REGION"
+        --no-allow-unauthenticated `
+        --invoker-iam-check `
+        --ingress internal `
+        --max-instances 1 `
+        --update-env-vars="PROJECT_ID=$PROJECT_ID,REGION=$REGION,KOE_MODE=demo,ENABLE_LIVE_CALLS=false,ENABLE_LIVE_EMAIL=false,ENABLE_LIVE_CALENDAR=false"
+    if ($LASTEXITCODE -ne 0) { throw "Deployment failed for $SERVICE" }
 }
 
 Write-Host "Deployment step finished." -ForegroundColor Green

@@ -1,3 +1,4 @@
+from common.security import ServiceMiddleware
 import logging
 import click
 import common.config as config
@@ -80,7 +81,7 @@ def main(host: str, port: int):
     import uvicorn
 
     logger.info(f"Starting Lead Manager A2A server on http://{host}:{port}/")
-    uvicorn.run(app_builder.build(), host=host, port=port)
+    uvicorn.run(ServiceMiddleware(app_builder.build(), "lead-manager", ['ui-client', 'gmail-listener']), host=host, port=port)
 
 if __name__ == "__main__":
     main()

@@ -1,3 +1,4 @@
+from common.security import ServiceMiddleware, ServiceAuth, service_url
 #!/usr/bin/env python3
 """Simple Lead Manager service without ADK dependencies"""
 
@@ -11,10 +12,11 @@ import click
 import common.config as config
 
 app = FastAPI()
+app.add_middleware(ServiceMiddleware, audience="lead-manager", callers={"ui-client", "gmail-listener"})
 
 class SearchRequest(BaseModel):
     query: str
-    ui_client_url: str = "http://localhost:8000"
+
 
 class EmailNotification(BaseModel):
     trigger: str
@@ -48,9 +50,9 @@ async def process_search(request: SearchRequest):
         }
         
         import httpx
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(auth=ServiceAuth("lead-manager", "ui-client")) as client:
             response = await client.post(
-                f"{request.ui_client_url}/webhook/lead_manager",
+                service_url("ui-client") + "/webhook/lead_manager",
                 json=payload,
                 timeout=5
             )

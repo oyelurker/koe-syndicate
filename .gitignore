@@ -36,3 +36,9 @@ private_deployment.md
 
 # Local Database
 tokens.db
+.runtime/
+.audit-venv/
+*.db-*
+*debug*.json
+*_upload_*.json
+lead_manager_meeting_*.json

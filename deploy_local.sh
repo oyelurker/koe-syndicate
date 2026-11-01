@@ -11,7 +11,9 @@ cd "$(dirname "$0")"
 # Source .env file if it exists to load all environment variables
 if [ -f .env ]; then
   echo "Loading environment variables from .env file..."
-  export $(grep -v '^#' .env | xargs)
+  set -a
+  source .env
+  set +a
 fi
 
 # Check if GOOGLE_API_KEY is set

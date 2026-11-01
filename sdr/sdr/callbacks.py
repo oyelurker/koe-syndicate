@@ -1,3 +1,4 @@
+from common.security import ServiceAuth
 """
 Callbacks for the SDR Agent.
 """
@@ -47,7 +48,7 @@ def send_sdr_update_to_ui(business_data: dict, email_sent_result: Optional[dict]
     data_for_ui = business_data.copy()
     
     # log data structures 
-    logger.debug(f"SDR [Callback] Data for UI: {data_for_ui}")
+    logger.debug("SDR callback prepared")
     logger.debug(f"SDR [Callback] Email sent result: {email_sent_result}")
 
     # Ensure 'city' is a top-level field for UI client's AgentUpdate validation
@@ -92,7 +93,7 @@ def send_sdr_update_to_ui(business_data: dict, email_sent_result: Optional[dict]
         email_subject = crafted.get("subject")
         body_preview = crafted.get("body", "").strip()[:50]
     else:
-        logger.warning(f"SDR [Callback] crafted_email could not be parsed as dict: {type(crafted)}")
+        logger.debug("Sensitive payload omitted")
     
     if email:
         data_for_ui['email'] = email
@@ -121,13 +122,13 @@ def send_sdr_update_to_ui(business_data: dict, email_sent_result: Optional[dict]
 
     logger.info(f"Sending POST to UI endpoint: {callback_endpoint} for business: {data_for_ui.get('name')}")
     try:
-        with httpx.Client() as client:
+        with httpx.Client(auth=ServiceAuth("sdr", "ui-client"), ) as client:
             response = client.post(callback_endpoint, json=payload, timeout=10.0)
             response.raise_for_status()
             logger.info(f"Successfully posted update for {data_for_ui.get('name')} to UI. Status: {response.status_code}")
             return True
     except httpx.HTTPStatusError as e:
-        logger.error(f"HTTP error {e.response.status_code} posting to UI client: {e.response.text}")
+        logger.error("HTTP error %s posting to UI client", e.response.status_code)
         return False
     except httpx.RequestError as e:
         logger.error(f"Network error sending POST request to UI client at {e.request.url}: {e}")
@@ -143,7 +144,7 @@ async def post_results_callback(callback_context: CallbackContext) -> Optional[g
     final_businesses: List[Dict[str, Any]] = []
 
     context_state = callback_context.state.to_dict()
-    logger.info(f"SDR [Callback] Current callback_context.state: {context_state}")
+    logger.debug("Sensitive payload omitted")
     
     # Helper function to safely parse a string that might be markdown-wrapped JSON
     def safe_json_parse(value: any, key_name: str) -> any:
@@ -181,7 +182,7 @@ async def post_results_callback(callback_context: CallbackContext) -> Optional[g
                     'crafted_email': crafted_email
                 }
             }
-            logger.info("SDR [Callback] Constructed email_sent_result from crafted_email")
+            logger.debug("Sensitive payload omitted")
         else:
             logger.info(f"SDR [Callback] No email data found in state for agent: {agent_name}, proceeding with business data only")
 
