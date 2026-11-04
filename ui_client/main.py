@@ -14,7 +14,7 @@ import sys
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional
 from datetime import datetime
 from enum import Enum
 from dotenv import load_dotenv
@@ -174,14 +174,16 @@ def empty_pipeline_state():
     }
 
 
-app_state = empty_pipeline_state()
+from .runtime import OwnerRuntime, runtime_owner
+
+app_state = OwnerRuntime(empty_pipeline_state)
 
 # Session Signer
 from common.security import ServiceAuth, SecurityError, require_action, mode, campaign_context
 from .security import BrowserSecurityMiddleware, validate_config
 from .store import Store
 from . import db as token_db
-from common.security import execution, owner_email
+from common.security import Execution, execution, owner_email
 
 pipeline_store: Store | None = None
 
@@ -207,8 +209,7 @@ def restore_pipeline(snapshot):
 
 def campaign_is_current(campaign_id):
     context = execution.get()
-    return bool(context and context.owner.lower() == owner_email()
-                and campaign_id and app_state["session_id"] == campaign_id)
+    return bool(context and campaign_id and app_state["session_id"] == campaign_id)
 
 
 def require_current_campaign():
@@ -231,38 +232,44 @@ class ConnectionManager:
     """Manages WebSocket connections for real-time updates."""
     
     def __init__(self, persist=None):
-        self.active_connections: Set[WebSocket] = set()
+        self.active_connections: dict[WebSocket, str] = {}
         self.persist = persist
     
     async def connect(self, websocket: WebSocket):
+        owner = runtime_owner()
         await websocket.accept()
-        self.active_connections.add(websocket)
+        self.active_connections[websocket] = owner
         logger.info(f"WebSocket connected. Total connections: {len(self.active_connections)}")
     
     def disconnect(self, websocket: WebSocket):
-        self.active_connections.discard(websocket)
+        self.active_connections.pop(websocket, None)
         logger.info(f"WebSocket disconnected. Total connections: {len(self.active_connections)}")
     
     async def send_update(self, data: dict[str, Any]):
-        """Send update to all connected clients."""
+        """Persist and publish only within the verified owner's current view."""
+        owner = runtime_owner()
+        context = execution.get()
+        campaign = context.campaign_id or app_state["session_id"]
+        if context.campaign_id:
+            require_current_campaign()
         if self.persist is not None:
             await self.persist(data)
-        if not self.active_connections:
-            return
-        
-        message = json.dumps(data, default=str)
-        disconnected = set()
-        
-        for connection in self.active_connections:
+        envelope = {**data, "campaign_id": campaign}
+        message = json.dumps(envelope, default=str)
+        # Snapshot membership: a disconnect/connect may happen while sending.
+        for connection, connection_owner in list(self.active_connections.items()):
+            if connection_owner != owner:
+                continue
+            # Recheck after every await; reset/new search invalidates old events.
+            if app_state["session_id"] != campaign:
+                return
+            if self.active_connections.get(connection) != owner:
+                continue
             try:
                 await connection.send_text(message)
-            except Exception as e:
-                logger.error(f"Error sending WebSocket message: {e}")
-                disconnected.add(connection)
-        
-        # Remove disconnected clients
-        for connection in disconnected:
-            self.disconnect(connection)
+            except Exception:
+                logger.warning("WebSocket delivery failed; disconnecting client")
+                self.disconnect(connection)
 
 manager = ConnectionManager(persist=persist_pipeline)
 
@@ -276,35 +283,42 @@ async def lifespan(app: FastAPI):
     # Initialize SQLite database
     await db.init_db()
     store = Store(token_db.DB_PATH)
-    app_state.clear()
-    app_state.update(empty_pipeline_state())
-    await asyncio.to_thread(store.interrupt_incomplete, owner_email())
-    restored = await asyncio.to_thread(store.load, owner_email())
-    if restored:
-        restore_pipeline(restored)
-    pipeline_store = store
-    logger.info("Database initialized successfully.")
+    token = execution.set(Execution(owner_email(), mode()))
+    try:
+        app_state.clear_all()
+        manager.active_connections.clear()
+        app_state.update(empty_pipeline_state())
+        await asyncio.to_thread(store.interrupt_incomplete, owner_email())
+        restored = await asyncio.to_thread(store.load, owner_email())
+        if restored:
+            restore_pipeline(restored)
+        pipeline_store = store
+        logger.info("Database initialized successfully.")
 
-    # ── NVIDIA RAPIDS: Pre-score demo leads at startup ────────────────────────
-    if RAPIDS_SCORING_AVAILABLE and not app_state["lead_scores"]:
-        try:
-            _demo_path = Path(__file__).parent.parent / "demo_leads.json"
-            if _demo_path.exists():
-                with open(_demo_path, "r") as _f:
-                    _demo_leads = json.load(_f)
-                app_state["lead_scores"] = _rapids_score_leads(_demo_leads)
-                logger.info(f"[RAPIDS] Scored {len(app_state['lead_scores'])} leads at startup.")
-            else:
-                logger.warning("[RAPIDS] demo_leads.json not found — scores unavailable until leads are generated.")
-        except Exception as _e:
-            logger.warning(f"[RAPIDS] Startup scoring failed: {_e}")
-    elif not RAPIDS_SCORING_AVAILABLE:
-        logger.warning("[RAPIDS] Scoring engine not loaded — /api/lead-scores will return empty.")
+        # ── NVIDIA RAPIDS: Pre-score demo leads at startup ────────────────────────
+        if RAPIDS_SCORING_AVAILABLE and not app_state["lead_scores"]:
+            try:
+                _demo_path = Path(__file__).parent.parent / "demo_leads.json"
+                if _demo_path.exists():
+                    with open(_demo_path, "r") as _f:
+                        _demo_leads = json.load(_f)
+                    app_state["lead_scores"] = _rapids_score_leads(_demo_leads)
+                    logger.info(f"[RAPIDS] Scored {len(app_state['lead_scores'])} leads at startup.")
+                else:
+                    logger.warning("[RAPIDS] demo_leads.json not found — scores unavailable until leads are generated.")
+            except Exception as _e:
+                logger.warning(f"[RAPIDS] Startup scoring failed: {_e}")
+        elif not RAPIDS_SCORING_AVAILABLE:
+            logger.warning("[RAPIDS] Scoring engine not loaded — /api/lead-scores will return empty.")
+    finally:
+        execution.reset(token)
 
     try:
         yield
     finally:
         pipeline_store = None
+        app_state.clear_all()
+        manager.active_connections.clear()
         logger.info("UI Client shutting down...")
 
 app = FastAPI(lifespan=lifespan, debug=False, docs_url=None, redoc_url=None, openapi_url=None)
@@ -1089,6 +1103,7 @@ async def websocket_endpoint(websocket: WebSocket):
         # Send current state to newly connected client
         await websocket.send_text(json.dumps({
             "type": "initial_state",
+            "campaign_id": app_state["session_id"],
             "businesses": [business.model_dump() for business in app_state["businesses"].values()],
             "current_city": app_state["current_city"],
             "is_running": app_state["is_running"],

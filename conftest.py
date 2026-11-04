@@ -1,6 +1,5 @@
 """Shared isolated configuration for the offline suite; never use real providers."""
 import base64
-import copy
 import json
 import socket
 
@@ -44,14 +43,14 @@ def offline_network(monkeypatch):
 @pytest.fixture(autouse=True)
 def reset_app_state(settings, monkeypatch):
     from ui_client import main
-    baseline = {"is_running": False, "current_city": None, "businesses": {},
-                "agent_updates": [], "websocket_connections": set(), "session_id": None,
-                "human_input_requests": {}, "lead_scores": {}}
+    from common.security import Execution, execution
+    token = execution.set(Execution("owner@example.test", "demo"))
     monkeypatch.setattr(main, "RAPIDS_SCORING_AVAILABLE", False)
-    main.app_state.clear()
-    main.app_state.update(copy.deepcopy(baseline))
+    main.app_state.clear_all()
     main.manager.active_connections.clear()
-    yield
-    main.app_state.clear()
-    main.app_state.update(copy.deepcopy(baseline))
-    main.manager.active_connections.clear()
+    try:
+        yield
+    finally:
+        main.app_state.clear_all()
+        main.manager.active_connections.clear()
+        execution.reset(token)

@@ -21,3 +21,5 @@ This checkpoint rejects obsolete results in the local process. It does not cance
 The new offline regressions exercise signed-header tampering, real signed HTTP propagation, current callback persistence, missing/old campaign rejection without state/events, stale human requests, delayed discovery success/failure after reset/replacement, normal discovery completion/context cleanup, and owner/task identity separation. Existing callback contract tests now supply an explicit active campaign. The maintained P0 authentication/replay assertions remain in place.
 
 Validation: the full offline suite passes **107 tests** (94 existing plus 13 campaign regressions), with four existing upstream SDK warnings. All five service import checks and `git diff --check` pass. Hosted PR validation remains pending publication.
+
+Follow-up: the owner runtime/socket checkpoint in `P1-OWNER-RUNTIME.md` replaces the shared UI cache and shared socket broadcast described as pending above. Cross-replica ordering and durable execution remain open.

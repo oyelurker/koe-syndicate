@@ -240,7 +240,7 @@ class TestWebSocketManager:
     
     def test_websocket_disconnect(self, connection_manager, mock_websocket):
         """Test WebSocket disconnection."""
-        connection_manager.active_connections.add(mock_websocket)
+        connection_manager.active_connections[mock_websocket] = "owner@example.test"
         connection_manager.disconnect(mock_websocket)
         
         assert mock_websocket not in connection_manager.active_connections
@@ -256,18 +256,18 @@ class TestWebSocketManager:
     @pytest.mark.asyncio
     async def test_send_update_with_connections(self, connection_manager, mock_websocket):
         """Test sending update to active connections."""
-        connection_manager.active_connections.add(mock_websocket)
+        connection_manager.active_connections[mock_websocket] = "owner@example.test"
         
         test_data = {"type": "test", "message": "hello"}
         await connection_manager.send_update(test_data)
         
-        mock_websocket.send_text.assert_called_once_with(json.dumps(test_data))
+        mock_websocket.send_text.assert_called_once_with(json.dumps({**test_data, "campaign_id": None}))
     
     @pytest.mark.asyncio
     async def test_send_update_connection_error(self, connection_manager, mock_websocket):
         """Test handling connection errors during update."""
         mock_websocket.send_text.side_effect = Exception("Connection error")
-        connection_manager.active_connections.add(mock_websocket)
+        connection_manager.active_connections[mock_websocket] = "owner@example.test"
         
         # Should handle the error gracefully and remove the connection
         await connection_manager.send_update({"type": "test"})
