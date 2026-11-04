@@ -8,7 +8,7 @@ import sqlite3
 import time
 import uuid
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 
 class StoreConflict(ValueError):
@@ -50,6 +50,9 @@ class Store:
             # Re-read after acquiring the writer lock: another process may migrate.
             version = connection.execute("PRAGMA user_version").fetchone()[0]
             if version == SCHEMA_VERSION:
+                return
+            if version == 3:
+                self._migrate_v4(connection)
                 return
             if version == 1:
                 self._migrate_v2(connection)
@@ -118,6 +121,12 @@ class Store:
         from common.execution_store import create_schema
         create_schema(connection)
         connection.execute("PRAGMA user_version=3")
+        self._migrate_v4(connection)
+
+    def _migrate_v4(self, connection):
+        from common.integration_store import create_schema
+        create_schema(connection)
+        connection.execute("PRAGMA user_version=4")
 
     def _migrate_v2(self, connection):
         connection.execute("ALTER TABLE pipeline_snapshots ADD COLUMN revision INTEGER NOT NULL DEFAULT 1")

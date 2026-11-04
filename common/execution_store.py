@@ -509,6 +509,14 @@ class WorkStore:
             require_action(row['kind'])
             self._checks(db,context,proposal)
 
+    def fail_reserved(self,key,error):
+        context=owner_context()
+        with self.connection() as db:
+            db.execute('BEGIN IMMEDIATE')
+            changed=db.execute("UPDATE provider_actions SET state='failed',result=? WHERE owner=? AND id=? AND campaign=? AND job_id=? AND state='reserved'",
+                (canonical({'success':False,'action_key':key,'error':error}),context.owner.lower(),key,context.campaign_id,context.job_id))
+            return changed.rowcount == 1
+
     def record(self,key,state,result=None,provider_id=None):
         context=owner_context()
         if state not in {'initiated','succeeded','failed','unknown'}:
@@ -524,6 +532,12 @@ class WorkStore:
                 raise PolicyDenied('Provider identity cannot be replaced')
             db.execute('UPDATE provider_actions SET state=?,provider_id=COALESCE(provider_id,?),result=? WHERE owner=? AND id=?',
                 (state,provider_id,canonical(result) if result is not None else row['result'],context.owner.lower(),key))
+            if state=='succeeded' and row['kind']=='calendar':
+                if not (provider_id or row['provider_id']) or not isinstance(result,dict) or not result.get('success'):
+                    raise PolicyDenied('Confirmed Calendar result required')
+                db.execute('INSERT OR IGNORE INTO meeting_records VALUES (?,?,?,?,?,?)',
+                    (context.owner.lower(),key,row['campaign'],provider_id or row['provider_id'],
+                     canonical({'request':json.loads(row['payload']),'receipt':result}),time.time()))
             self._audit(db,context.owner,key,state,'Provider evidence recorded; no resend')
             if state in {'succeeded','failed'}:
                 final='completed' if state=='succeeded' else 'failed'

@@ -1,4 +1,5 @@
 $ErrorActionPreference = "Stop"
+throw "Cloud Run deployment is deferred: shared SQLite is only verified on one host. Complete item 22 storage, identity transport and staging validation first."
 
 # Load .env variables if present
 if (Test-Path .env) {
@@ -24,9 +25,9 @@ foreach ($SERVICE in $SERVICES) {
     Write-Host "======================================" -ForegroundColor Yellow
     Write-Host "Deploying $SERVICE..." -ForegroundColor Yellow
     Write-Host "======================================" -ForegroundColor Yellow
-    
+
     $YAML_FILE = "cloudbuild_$($SERVICE.Replace('-', '_')).yaml"
-    
+
     if (-Not (Test-Path $YAML_FILE)) {
         throw "Build configuration missing: $YAML_FILE; refusing to deploy an unverified image"
     } else {
@@ -34,9 +35,9 @@ foreach ($SERVICE in $SERVICES) {
         gcloud builds submit --config="$YAML_FILE" .
         if ($LASTEXITCODE -ne 0) { throw "Build failed for $SERVICE" }
     }
-    
+
     $IMAGE = "${DOCKER_REPO}/${SERVICE}:latest"
-    
+
     Write-Host "Deploying $SERVICE to Cloud Run..." -ForegroundColor Cyan
     gcloud run deploy "$SERVICE" `
         --image="$IMAGE" `

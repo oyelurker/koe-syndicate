@@ -32,6 +32,8 @@ def allowed_origins():
 
 
 def validate_config():
+    from common.preflight import validate_runtime
+    validate_runtime('ui-client')
     secret("SESSION_SECRET")
     require_owner(os.getenv("KOE_OWNER_EMAIL", ""))
     mode()

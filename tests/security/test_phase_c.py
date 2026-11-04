@@ -17,7 +17,7 @@ from fastapi.testclient import TestClient
 from common.security import Execution, SecurityError, ServiceAuth, execution, verify_request
 from common.execution_store import WorkStore, PolicyDenied, enqueue, normalize_phone
 from ui_client import db,main
-from ui_client.store import Store
+from ui_client.store import Store, SCHEMA_VERSION as StoreVersion
 
 OWNER='owner@example.test'
 PHONE='+15555550100'
@@ -463,7 +463,7 @@ def test_schema_two_upgrade_is_atomic_and_preserves_encrypted_auth(monkeypatch):
     monkeypatch.setattr(execution_store,'create_schema',original)
     store.initialize()
     with store.connection() as connection:
-        assert connection.execute('PRAGMA user_version').fetchone()[0]==3
+        assert connection.execute('PRAGMA user_version').fetchone()[0]==StoreVersion
         assert tuple(connection.execute('SELECT access_token,refresh_token,client_secret FROM users').fetchone())==before
 
 

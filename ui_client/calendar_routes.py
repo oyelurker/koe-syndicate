@@ -1,13 +1,15 @@
 """Owner-scoped Calendar gateway. OAuth tokens never leave the UI service."""
 import asyncio
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from googleapiclient.discovery import build
+from google_auth_httplib2 import AuthorizedHttp
+import httplib2
 from pydantic import BaseModel, Field, ConfigDict
 
 from common.security import execution, require_owner, require_action, SecurityError
@@ -42,21 +44,36 @@ async def owner_service():
     creds = await db.credentials_for_owner(context.owner)
     if creds is None:
         raise SecurityError("Calendar owner is not connected")
-    return await asyncio.to_thread(build, "calendar", "v3", credentials=creds, cache_discovery=False)
+    return await asyncio.to_thread(build, "calendar", "v3", http=AuthorizedHttp(creds, http=httplib2.Http(timeout=10)), cache_discovery=False)
 
 
-def free_slots(service, days, duration=60):
-    info = service.calendars().get(calendarId="primary").execute()
+def local_time(value, tz):
+    naive = datetime.strptime(value, "%Y-%m-%d %H:%M")
+    candidates = []
+    for fold in (0, 1):
+        aware = naive.replace(tzinfo=tz, fold=fold)
+        if aware.astimezone(timezone.utc).astimezone(tz).replace(tzinfo=None) == naive:
+            candidates.append(aware)
+    if not candidates:
+        raise ValueError("Meeting time does not exist in the Calendar timezone")
+    if len({c.utcoffset() for c in candidates}) > 1:
+        raise ValueError("Meeting time is ambiguous in the Calendar timezone; choose another time")
+    return candidates[0]
+
+
+def free_slots(service, days, duration=60, now=None):
+    info = service.calendars().get(calendarId="primary").execute(num_retries=0)
     tz = ZoneInfo(info.get("timeZone", "UTC"))
-    now = datetime.now(tz)
+    now = now.astimezone(tz) if now is not None else datetime.now(tz)
     end = now + timedelta(days=days)
     result = service.freebusy().query(body={"timeMin": now.isoformat(), "timeMax": end.isoformat(),
-                                           "items": [{"id": "primary"}]}).execute()
+                                           "items": [{"id": "primary"}]}).execute(num_retries=0)
     calendar = result["calendars"]["primary"]
     if calendar.get("errors"):
         raise ValueError("Calendar availability unavailable")
     busy = [(datetime.fromisoformat(b["start"].replace("Z", "+00:00")),
              datetime.fromisoformat(b["end"].replace("Z", "+00:00"))) for b in calendar.get("busy", [])]
+    busy = [(a.astimezone(timezone.utc), b.astimezone(timezone.utc)) for a,b in busy]
     slots = []
     for day in range(days + 1):
         start = (now + timedelta(days=day)).replace(hour=9, minute=0, second=0, microsecond=0)
@@ -64,8 +81,13 @@ def free_slots(service, days, duration=60):
             continue
         close = start.replace(hour=18)
         while start + timedelta(minutes=duration) <= min(close, end):
-            finish = start + timedelta(minutes=duration)
-            if start >= now and not any(start < b and finish > a for a, b in busy):
+            try:
+                local_time(start.strftime('%Y-%m-%d %H:%M'), tz)
+            except ValueError:
+                start += timedelta(minutes=30)
+                continue
+            finish = (start.astimezone(timezone.utc) + timedelta(minutes=duration)).astimezone(tz)
+            if start.timestamp() >= now.timestamp() and finish.timestamp() <= end.timestamp() and finish.timestamp() <= close.timestamp() and not any(start.astimezone(timezone.utc) < b and finish.astimezone(timezone.utc) > a for a, b in busy):
                 slots.append({"start": start.isoformat(), "end": finish.isoformat()})
             start += timedelta(minutes=30)
     return {"success": True, "timezone": str(tz), "available_slots": slots[:20]}
@@ -94,11 +116,14 @@ async def reconcile_meeting(key):
     if not row or row["kind"]!="calendar":
         return {"success":False,"error":"Calendar action not found"}
     if row["state"] in {"succeeded","failed"}:
+        if row["state"] == "succeeded":
+            from common.integration_store import IntegrationStore
+            await asyncio.to_thread(IntegrationStore().save_meeting, key)
         return cached_result(row)
     try:
         service=await owner_service()
         event=await asyncio.wait_for(asyncio.to_thread(lambda: service.events().get(calendarId="primary",eventId=key).execute(num_retries=0)),15)
-        if event.get("extendedProperties",{}).get("private",{}).get("koe_action_key")!=key:
+        if event.get("status") == "cancelled" or event.get("extendedProperties",{}).get("private",{}).get("koe_action_key")!=key:
             return {"success":False,"error":"Provider evidence does not match this action"}
         req=Meeting.model_validate(json.loads(row["payload"]))
         result=confirmed_meeting(event,req,key)
@@ -123,8 +148,8 @@ async def meeting(req: Meeting):
             return await reconcile_meeting(key)
         service=await owner_service()
         slots=await asyncio.to_thread(free_slots,service,30,req.duration_minutes)
-        start=datetime.strptime(req.preferred_date+" "+req.preferred_time,"%Y-%m-%d %H:%M").replace(tzinfo=ZoneInfo(slots["timezone"]))
-        end=start+timedelta(minutes=req.duration_minutes)
+        start=local_time(req.preferred_date+" "+req.preferred_time,ZoneInfo(slots["timezone"]))
+        end=(start.astimezone(timezone.utc)+timedelta(minutes=req.duration_minutes)).astimezone(start.tzinfo)
         if start<=datetime.now(start.tzinfo):
             raise ValueError("Meeting must be in the future")
         def insert():
@@ -132,6 +157,8 @@ async def meeting(req: Meeting):
             busy=service.freebusy().query(body={"timeMin":start.isoformat(),"timeMax":end.isoformat(),"items":[{"id":"primary"}]}).execute(num_retries=0)["calendars"]["primary"]
             if busy.get("errors") or busy.get("busy"):
                 raise ValueError("Calendar slot unavailable")
+            from common.integration_store import IntegrationStore
+            IntegrationStore().claim_calendar(key,start,end)
             ledger.begin(key)
             dispatched=True
             event=service.events().insert(calendarId="primary",sendUpdates="all",body={
@@ -144,11 +171,22 @@ async def meeting(req: Meeting):
             return result
         return await asyncio.wait_for(asyncio.to_thread(insert),20)
     except SecurityError as exc:
+        if key and not dispatched:
+            await asyncio.to_thread(ledger.fail_reserved,key,str(exc))
         return JSONResponse({"success":False,"error":str(exc),"action_key":key},403)
     except ValueError as exc:
+        if key and not dispatched:
+            await asyncio.to_thread(ledger.fail_reserved,key,str(exc))
         return JSONResponse({"success":False,"error":str(exc),"action_key":key},400)
     except Exception:
+        if key:
+            stopped=await asyncio.to_thread(ledger.fail_reserved,key,'Calendar preflight failed; no event was sent')
+            if stopped:
+                return JSONResponse({'success':False,'action_key':key,'error':'Calendar preflight failed; no event was sent'},502)
+            row=await asyncio.to_thread(ledger.action,key)
+            if row and row['state'] in {'succeeded','failed'}:
+                return cached_result(row)
         result={"success":False,"error":"Calendar outcome is uncertain; reconcile before retrying","action_key":key}
-        if dispatched:
+        if key:
             await asyncio.to_thread(ledger.record,key,"unknown",result)
         return JSONResponse(result,502)

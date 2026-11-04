@@ -114,3 +114,9 @@ async def current_policy():
 @router.get('/outreach/actions')
 async def action_receipts():
     return {'actions':await asyncio.to_thread(WorkStore().actions)}
+
+
+@router.get("/meetings")
+async def meetings():
+    from common.integration_store import IntegrationStore
+    return {"storage": "local_sqlite", "meetings": await asyncio.to_thread(IntegrationStore().meetings)}

@@ -22,6 +22,11 @@ if [ -z "$GOOGLE_API_KEY" ]; then
   exit 1
 fi
 
+# Resolve a single shared path for every process before startup.
+export DB_PATH="$(python -c 'import os; from pathlib import Path; print(Path(os.getenv("DB_PATH", "tokens.db")).resolve())')"
+export SECURITY_DB_PATH="$(python -c 'import os; from pathlib import Path; print(Path(os.getenv("SECURITY_DB_PATH", ".runtime/security.db")).resolve())')"
+python -m common.preflight
+
 export GOOGLE_MAPS_API_KEY="${GOOGLE_MAPS_API_KEY:-}"
 
 echo "Using GOOGLE_API_KEY for Gemini LLM inference..."

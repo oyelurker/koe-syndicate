@@ -1,6 +1,6 @@
 # P1 verification checkpoint — 4 November 2026
 
-Items 11–18 are complete for the restricted local/shared-database scope. See `P1-CONCURRENCY.md` for item 15, its multi-process evidence and its deployment limits. The durable-storage foundation was merged through PR #20; see `P1-STORAGE.md`. Hosted CI and main's merge protection are verified, including the deliberate failure and recovery proof recorded below. Phase C execution safeguards are documented in `P1-PHASE-C.md`. Integrations and cloud deployment remain pending in items 19–22. Cloud services stay IAM-contained and live actions stay disabled.
+Items 11–21 are complete for the restricted local/shared-database scope. See `P1-CONCURRENCY.md` for item 15, its multi-process evidence and its deployment limits. The durable-storage foundation was merged through PR #20; see `P1-STORAGE.md`. Hosted CI and main's merge protection are verified, including the deliberate failure and recovery proof recorded below. Phase C execution safeguards are documented in `P1-PHASE-C.md`. The Phase D integration checkpoint is documented in `P1-PHASE-D.md`; deployment item 22 remains pending. Cloud services stay IAM-contained and live actions stay disabled.
 
 ## Backend baseline — item 11 complete
 
@@ -48,3 +48,7 @@ The configuration follows the official [GitHub Actions Python guide](https://doc
 ## Phase C final checkpoint — 4 November 2026
 
 Items 16–18 pass the complete offline suite: **172 passed**, with four existing upstream SDK deprecation warnings, in 84.21 seconds. This includes local process restart/claim recovery, independent-process quota races, signed exact-action dispatch, migration rollback, cancellation, provider timeout/reconciliation and policy enforcement. Frontend lint (zero warnings), TypeScript and production build pass. Whitespace validation and the tracked-file secret check pass (zero matches). Providers were mocked; no live writes or cloud deployment were performed. See `P1-PHASE-C.md` and the explicit 29-file commit manifest `P1-PHASE-C-COMMIT-FILES.txt`. Hosted CI awaits publication.
+
+## Phase D final checkpoint — 4 November 2026
+
+The complete offline suite passes **198 tests** in 68.06 seconds, with four existing upstream SDK warnings. Items 19–21 are verified in the restricted shared-host scope: Gmail acceptance/retry/cursors and actual job-bound tool handoff, Calendar DST/availability and concurrent interval fencing, and atomic confirmed meeting persistence with rollback/recovery. Runtime preflight rejection tests pass. Windows launcher syntax and tracked-file secret checks pass. No frontend code changed from the preceding lint/typecheck/build checkpoint. Item 22 remains open: Docker Desktop Linux engine is unavailable; no Linux image build, real-provider validation or cloud staging was performed. See `P1-PHASE-D.md` and the 28-file `P1-PHASE-D-COMMIT-FILES.txt` manifest.

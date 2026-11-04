@@ -201,6 +201,9 @@ class ServiceMiddleware:
         self.app, self.audience, self.callers = app, audience, callers
 
     async def __call__(self, scope, receive, send):
+        if scope['type'] == 'lifespan':
+            from .preflight import validate_runtime
+            validate_runtime(self.audience)
         if scope["type"] not in {"http", "websocket"}:
             return await self.app(scope, receive, send)
         if scope["type"] == "websocket":
