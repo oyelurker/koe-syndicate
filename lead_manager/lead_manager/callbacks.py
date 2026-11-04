@@ -25,6 +25,9 @@ def send_calendar_notification_to_ui(calendar_request: Dict[str, Any]) -> None:
     if not isinstance(calendar_request, dict) or calendar_request.get("success") is not True or not calendar_request.get("meeting_id"):
         logger.info("No confirmed Calendar event to notify")
         return
+    from common.execution_store import WorkStore
+    if not WorkStore().confirmed(calendar_request.get('action_key'),'calendar',calendar_request.get('meeting_id')):
+        return None
     ui_client_url = os.environ.get(
         "UI_CLIENT_SERVICE_URL", config.DEFAULT_UI_CLIENT_URL
     ).rstrip("/")

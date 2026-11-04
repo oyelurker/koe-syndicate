@@ -13,7 +13,7 @@ from google.oauth2.credentials import Credentials
 
 from common.security import Execution, ServiceAuth
 from ui_client import db, security
-from ui_client.store import Store, tenant_id
+from ui_client.store import SCHEMA_VERSION, Store, tenant_id
 
 OWNER = "owner@example.test"
 
@@ -89,7 +89,7 @@ def test_legacy_oauth_database_migrates_without_losing_encrypted_tokens():
     asyncio.run(db.init_db())
     asyncio.run(db.init_db())
     with sqlite3.connect(db.DB_PATH) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 1
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
         assert connection.execute("SELECT access_token,refresh_token,client_secret FROM users").fetchone() == before
         assert connection.execute("SELECT connected FROM integration_connections WHERE tenant_id=?", (tenant_id(OWNER),)).fetchone()[0] == 1
     assert asyncio.run(db.credentials_for_owner(OWNER)).refresh_token == "fixture-refresh"
@@ -186,8 +186,10 @@ def test_real_app_restores_callback_state_after_restart():
         prepare()
         payload = {"agent_type": "sdr", "business_id": "saved-lead", "status": "engaged", "message": "Fixture update",
                    "data": {"name": "Persisted Business", "city": "Test City"}}
+        main.app_state["session_id"] = "fixture-campaign"
+        main.pipeline_store.save(OWNER, main.pipeline_snapshot())
         request = httpx.Request("POST", "http://localhost:8000/agent_callback", json=payload)
-        signed = next(ServiceAuth("sdr", "ui-client", Execution(OWNER, "demo")).auth_flow(request))
+        signed = next(ServiceAuth("sdr", "ui-client", Execution(OWNER, "demo", "fixture-campaign")).auth_flow(request))
         assert client.post(request.url.path, content=request.content, headers=dict(signed.headers)).status_code == 200
         expected = main.app_state["businesses"]["saved-lead"].model_dump(mode="json")
     main.app_state["businesses"].clear()

@@ -1,359 +1,156 @@
-from common.security import require_action
-"""
-Phone call tool for outreach activities using ElevenLabs Conversational AI.
-"""
-import os
-import json
-import time
+"""Bounded asynchronous phone execution with durable at-most-once dispatch."""
 import asyncio
-from datetime import datetime
-from pathlib import Path
-from typing import Dict, Any, Optional
-import logging
-from elevenlabs import ElevenLabs
-
-from google.adk.tools import FunctionTool, ToolContext
+import json
+import math
+import os
+import re
+import time
+import httpx
+from elevenlabs import AsyncElevenLabs
+from google.adk.tools import FunctionTool
+from common.security import require_action, SecurityError
+from common.execution_store import WorkStore, normalize_phone, cached_result, PolicyDenied
 from ..config import ELEVENLABS_API_KEY, ELEVENLABS_AGENT_ID, ELEVENLABS_PHONE_NUMBER_ID
 from ..prompts import CALLER_PROMPT
 
-logger = logging.getLogger(__name__)
 
-def validate_us_phone_number(phone_number: str) -> Dict[str, Any]:
-    """Validate phone number format (allows US and international numbers)."""
-    import re
-    
-    # Remove all non-digit characters
-    digits_only = re.sub(r'\D', '', phone_number)
-    
-    if len(digits_only) >= 10:
-        if phone_number.startswith('+'):
-            normalized = f"+{digits_only}"
-        elif len(digits_only) == 10:
-            normalized = f"+1{digits_only}"
-        elif len(digits_only) == 12 and digits_only.startswith('91'):
-            normalized = f"+{digits_only}"
-        else:
-            normalized = f"+1{digits_only}"
-        return {
-            "valid": True,
-            "error": None,
-            "normalized": normalized
-        }
-    else:
-        return {
-            "valid": False,
-            "error": f"Invalid phone number format: {phone_number}. Expected at least 10 digits.",
-            "normalized": None
-        }
-    
-    return {
-        "valid": True,
-        "error": None,
-        "normalized": normalized
-    }
-
-def _init_elevenlabs_client():
-    """Initialize and return the ElevenLabs client and conversational AI subclient."""
+def validate_us_phone_number(phone_number):
     try:
-        from elevenlabs import ElevenLabs
-        
-        api_key = ELEVENLABS_API_KEY
-        if not api_key:
-            raise ValueError("ELEVENLABS_API_KEY not found in environment variables.")
-            
-        client = ElevenLabs(api_key=api_key)
-        convai = client.conversational_ai
-    
-        return client, convai
-    except ImportError:
-        logger.error("ElevenLabs library not available. Please install: pip install elevenlabs")
-        return None, None
-    except Exception as e:
-        logger.error(f"Failed to initialize ElevenLabs client: {e}")
-        return None, None
+        return {'valid':True,'normalized':normalize_phone(phone_number),'error':None}
+    except SecurityError as exc:
+        return {'valid':False,'normalized':None,'error':str(exc)}
 
-async def _make_call(
-    to_number: str,
-    system_prompt: str,
-    first_message: str,
-    poll_interval: float = 1.0
-) -> dict[str, Any]:
-    """
-    Place a test outbound call via ElevenLabs Conversational-AI → Twilio
-    and return its transcript & metadata.
-    """
-    require_action("calls")
-    result = {
-        "status": "initializing",
-        "transcript": [],
-        "debug_info": [],
-        "error": None,
-        "conversation_id": None,
-    }
-    def add(msg: str):
-        result["debug_info"].append(msg)
-        logger.info(msg)
 
-    # --- sanity checks -----------------------------------------------------
-    for var, val in [
-        ("ELEVENLABS_API_KEY", ELEVENLABS_API_KEY),
-        ("ELEVENLABS_AGENT_ID", ELEVENLABS_AGENT_ID),
-        ("ELEVENLABS_PHONE_NUMBER_ID", ELEVENLABS_PHONE_NUMBER_ID),
-    ]:
-        if not val:
-            err = f"{var} environment variable is not set"
-            add(f"ERROR: {err}")
-            result.update(status="error", error=err)
+def _init_elevenlabs_client(http_client):
+    if not all((ELEVENLABS_API_KEY,ELEVENLABS_AGENT_ID,ELEVENLABS_PHONE_NUMBER_ID)):
+        raise ValueError('Call provider configuration is incomplete')
+    client=AsyncElevenLabs(api_key=ELEVENLABS_API_KEY,timeout=10,httpx_client=http_client,follow_redirects=False)
+    return client,client.conversational_ai
+
+
+def _result(details,conversation_id):
+    status=getattr(details,'status','unknown')
+    turns=getattr(details,'transcript',None) or []
+    transcript=[{'role':getattr(t,'role','unknown'),'message':str(getattr(t,'message',getattr(t,'text','')))} for t in turns]
+    return {'status':status,'conversation_id':conversation_id,'transcript':transcript,
+            'error':None if status=='done' else ('Provider call failed' if status=='failed' else None)}
+
+
+async def _stop_call(call_sid):
+    """Stop a known Twilio call; deleting an ElevenLabs transcript is not hangup."""
+    account=os.getenv('TWILIO_ACCOUNT_SID',''); secret=os.getenv('TWILIO_AUTH_TOKEN','')
+    if not re.fullmatch(r'AC[a-fA-F0-9]{32}',account) or not secret or not re.fullmatch(r'CA[a-fA-F0-9]{32}',call_sid or ''):
+        return False
+    try:
+        async with httpx.AsyncClient(timeout=5,follow_redirects=False) as client:
+            url=f'https://api.twilio.com/2010-04-01/Accounts/{account}/Calls/{call_sid}.json'
+            current=await client.get(url,auth=(account,secret))
+            if not current.is_success:
+                return False
+            status=current.json().get('status')
+            if status in {'completed','canceled','busy','failed','no-answer'}:
+                return True
+            target='canceled' if status in {'queued','initiated','ringing'} else 'completed'
+            response=await client.post(url,auth=(account,secret),data={'Status':target})
+            return response.is_success
+    except Exception:
+        return False
+
+
+async def reconcile_call(action_key):
+    ledger=WorkStore(); row=await asyncio.to_thread(ledger.action,action_key)
+    if not row or row['kind']!='calls':
+        return {'status':'error','error':'Call action not found'}
+    if row['state'] in {'succeeded','failed'} or not row['provider_id']:
+        return cached_result(row)
+    try:
+        async with httpx.AsyncClient(timeout=10,follow_redirects=False) as transport:
+            _,convai=_init_elevenlabs_client(transport)
+            async with asyncio.timeout(12):
+                details=await convai.conversations.get(row['provider_id'],request_options={'timeout_in_seconds':10,'max_retries':0})
+        result=_result(details,row['provider_id'])
+        if result['status'] in {'done','failed'}:
+            await asyncio.to_thread(ledger.record,action_key,'succeeded' if result['status']=='done' else 'failed',result,row['provider_id'])
             return result
+    except Exception:
+        pass
+    return cached_result(row)
 
-    client, convai = _init_elevenlabs_client()
-    if not client or not convai:
-        err = "Failed to initialise ElevenLabs client"
-        add(f"ERROR: {err}")
-        result.update(status="error", error=err)
-        return result
 
-    # --- 1️⃣  start the call ----------------------------------------------
-    add(f"Initiating call → {to_number}")
+async def _make_call(to_number,system_prompt,first_message,poll_interval=1.0,*,total_timeout=None):
+    require_action('calls')
+    ledger=WorkStore(); key=None; dispatched=False; conversation_id=None; call_sid=None
     try:
-        response = convai.twilio.outbound_call(      # ← new namespace!
-            agent_id=ELEVENLABS_AGENT_ID,
-            agent_phone_number_id=ELEVENLABS_PHONE_NUMBER_ID,
-            to_number=to_number,
-            conversation_initiation_client_data={
-                "conversation_config_override": {
-                    "agent": {
-                        "prompt": {"prompt": system_prompt},
-                        "first_message": first_message,
-                    }
-                }
-            },
-        )
+        number=normalize_phone(to_number)
+        max_duration=int(os.getenv('MAX_CALL_SECONDS','120'))
+        if not 60<=max_duration<=600:
+            raise ValueError('MAX_CALL_SECONDS must be between 60 and 600')
+        if not re.fullmatch(r'AC[a-fA-F0-9]{32}',os.getenv('TWILIO_ACCOUNT_SID','')) or len(os.getenv('TWILIO_AUTH_TOKEN',''))<16:
+            raise ValueError('Twilio cancellation credentials are required before live calls')
+        payload={'number':number,'system_prompt':system_prompt,'first_message':first_message,'max_duration_seconds':max_duration,
+                 'agent_id':ELEVENLABS_AGENT_ID,'phone_number_id':ELEVENLABS_PHONE_NUMBER_ID}
+        key=await asyncio.to_thread(ledger.propose,'calls',[number],payload)
+        row=await asyncio.to_thread(ledger.reserve,key,math.ceil(max_duration/60))
+        if row['state']!='reserved':
+            return await reconcile_call(key)
+        deadline=total_timeout if total_timeout is not None else max_duration+40
+        if not 0<deadline<=660:
+            raise ValueError('Invalid total call deadline')
+        async with httpx.AsyncClient(timeout=10,follow_redirects=False) as transport:
+            _,convai=_init_elevenlabs_client(transport)
+            async with asyncio.timeout(deadline):
+                await asyncio.to_thread(ledger.begin,key)
+                dispatched=True
+                response=await convai.twilio.outbound_call(agent_id=ELEVENLABS_AGENT_ID,
+                    agent_phone_number_id=ELEVENLABS_PHONE_NUMBER_ID,to_number=number,
+                    call_recording_enabled=False,telephony_call_config={'ringing_timeout_secs':15},
+                    conversation_initiation_client_data={'dynamic_variables':{'koe_action_key':key},
+                        'conversation_config_override':{'conversation':{'max_duration_seconds':max_duration},
+                            'agent':{'prompt':{'prompt':system_prompt},'first_message':first_message}}},
+                    request_options={'timeout_in_seconds':10,'max_retries':0})
+                conversation_id=getattr(response,'conversation_id',None)
+                call_sid=getattr(response,'call_sid',None) or getattr(response,'callSid',None)
+                if not getattr(response,'success',True) or not conversation_id:
+                    raise ValueError('Provider did not confirm a conversation identifier')
+                await asyncio.to_thread(ledger.record,key,'initiated',{'call_sid':call_sid},conversation_id)
+                while True:
+                    await asyncio.to_thread(ledger.check,key)
+                    details=await convai.conversations.get(conversation_id,request_options={'timeout_in_seconds':10,'max_retries':0})
+                    result=_result(details,conversation_id)
+                    if result['status'] in {'done','failed'}:
+                        result['call_sid']=call_sid
+                        await asyncio.to_thread(ledger.record,key,'succeeded' if result['status']=='done' else 'failed',result,conversation_id)
+                        return {**result,'action_key':key}
+                    await asyncio.sleep(max(0.05,min(float(poll_interval),2)))
+    except asyncio.CancelledError:
+        if dispatched:
+            stopped=await _stop_call(call_sid)
+            await asyncio.to_thread(ledger.record,key,'unknown',{'status':'cancelled','hangup_confirmed':stopped,'call_sid':call_sid},conversation_id)
+        raise
     except Exception as exc:
-        add(f"Error initiating call: {exc}")
-        result.update(status="error", error=str(exc))
+        category=('timeout' if isinstance(exc,TimeoutError) else 'policy' if isinstance(exc,SecurityError)
+                  else 'authentication' if getattr(exc,'status_code',None) in {401,403}
+                  else 'quota' if getattr(exc,'status_code',None)==429 else 'provider')
+        rejected=dispatched and conversation_id is None and getattr(exc,'status_code',None) in {400,401,403,404,422,429}
+        result={'status':'failed' if rejected else 'unknown' if dispatched else 'error','error_category':category,
+                'error':str(exc) if isinstance(exc,(SecurityError,ValueError)) else 'Call provider request failed',
+                'conversation_id':conversation_id,'call_sid':call_sid,'action_key':key,'transcript':[]}
+        if dispatched:
+            result['hangup_confirmed']=await _stop_call(call_sid)
+            await asyncio.to_thread(ledger.record,key,'failed' if rejected else 'unknown',result,conversation_id)
         return result
 
-    conv_id = getattr(response, "conversation_id", None) or getattr(response, "callSid", None)
-    if not conv_id:
-        err = "Conversation ID missing in outbound_call response"
-        add(f"ERROR: {err}")
-        result.update(status="error", error=err)
-        return result
 
-    result.update(status="initiated", conversation_id=conv_id)
-    add(f"Call started (conversation_id = {conv_id})")
+async def phone_call(business_data:dict,proposal:str):
+    require_action('calls')
+    if not isinstance(business_data,dict) or not isinstance(proposal,str) or not proposal.strip():
+        return {'status':'error','error_category':'validation','error':'Business and proposal are required'}
+    phone=business_data.get('phone') or business_data.get('phone_number')
+    validation=validate_us_phone_number(phone)
+    if not validation['valid']:
+        return {'status':'error','error_category':'validation','error':validation['error']}
+    prompt=CALLER_PROMPT.format(business_data=json.dumps(business_data,sort_keys=True),proposal=proposal)
+    return await _make_call(validation['normalized'],prompt,
+        'Hello, this is Koe Syndicate. Is this a convenient time to discuss your business website?')
 
-    # --- 2️⃣  poll until finished -----------------------------------------
-    terminal = {"done", "failed"}
-    while True:
-        time.sleep(poll_interval)
-        try:
-            details = convai.conversations.get(conv_id)   # ← new helper!
-            status  = getattr(details, "status", "unknown")
-            result["status"] = status
-            add(f"Polling status: {status}")
-            if status in terminal:
-                break
-        except Exception as exc:
-            add(f"Error polling: {exc}")
-            result.update(status="error_polling", error=str(exc))
-            return result
-
-    # --- 3️⃣  extract transcript ------------------------------------------
-    turns = (
-        getattr(details, "transcript", None)
-        or getattr(details, "turns", None)
-        or []
-    )
-    formatted = []
-    for t in turns:
-        role = getattr(t, "role", "unknown")
-        msg  = (
-            t.message if hasattr(t, "message") else
-            getattr(t, "text", "unknown")
-        )
-        if hasattr(msg, "text"):  # ElevenLabs sometimes nests TextObject
-            msg = msg.text
-        formatted.append({"role": role, "message": msg})
-    result["transcript"] = formatted
-    return result
-
-async def phone_call(business_data: dict[str, Any], proposal: str) -> dict[str, Any]:
-    """
-    Function for calling a Business to discuss website development.
-
-    Args:
-        business_data (dict[str, Any]): The business data containing phone number and other details.
-        proposal (str): The proposal to present during the call.
-        tool_context (ToolContext): The context containing all necessary information for the call.
-
-    Returns:
-        A dictionary containing test call results
-    """
-    require_action("calls")
-    
-    logger.info("⚒️ [TOOL] 📞 Starting phone call tool...")
-    
-
-    # await asyncio.sleep(3)
-    # mock_result = {
-    #   "status": "done",
-    #   "transcript": [
-    #     {
-    #       "role": "agent",
-    #       "message": "Hello!.. This is Lexi from Web Solutions Inc. I hope I'm not catching you at a bad time. I'm calling to let you know about our website development services for you. Do you have just a quick moment to chat?"
-    #     },
-    #     {
-    #       "role": "user",
-    #       "message": "Yes, I would like to receive the email with proposal right away."
-    #     },
-    #     {
-    #       "role": "agent",
-    #       "message": "Great! I understand that The Sportsman has been a cornerstone of the Logan community for over seventy years, and I'd like..."
-    #     },
-    #     {
-    #       "role": "user",
-    #       "message": "Yes, just send it to MEINNPS at gmail.com."
-    #     },
-    #     {
-    #       "role": "agent",
-    #       "message": "Thank you for confirming your email address. Just to be clear, is that M. E. I. N. N. P. S. at gmail dot com? Also, do I..."
-    #     },
-    #     {
-    #       "role": "user",
-    #       "message": "Yes, sure."
-    #     },
-    #     {
-    #       "role": "agent",
-    #       "message": "Perfect! I'll send over the proposal right away. If you express interest by replying to the email, we'll create and send you a demo website MVP tailored to your business. After you review it, a..."
-    #     },
-    #     {
-    #       "role": "user",
-    #       "message": "Okay."
-    #     },
-    #     {
-    #       "role": "agent",
-    #       "message": "Great, I'm glad we could connect! I'm sending the email now, and a human from our team will contact you later. Have a great rest of your day!"
-    #     }
-    #   ],
-    #   "debug_info": [
-    #     "Initiating call → +14353173849",
-    #     "Call started (conversation_id = conv_01jxv205n2f2s96ycrcx00s1cx)",
-    #     "Polling status: initiated",
-    #     "Polling status: initiated",
-    #     "Polling status: in-progress",
-    #     "Polling status: in-progress",
-    #     "Polling status: in-progress",
-    #     "Polling status: in-progress",
-    #     "Polling status: in-progress",
-    #     "Polling status: in-progress",
-    #     "Polling status: in-progress",
-    #     "Polling status: in-progress",
-    #     "Polling status: in-progress",
-    #     "Polling status: in-progress",
-    #     "Polling status: in-progress",
-    #     "Polling status: in-progress",
-    #     "Polling status: in-progress",
-    #     "Polling status: in-progress",
-    #     "Polling status: in-progress",
-    #     "Polling status: in-progress",
-    #     "Polling status: in-progress",
-    #     "Polling status: in-progress",
-    #     "Polling status: in-progress",
-    #     "Polling status: in-progress",
-    #     "Polling status: in-progress",
-    #     "Polling status: in-progress",
-    #     "Polling status: in-progress",
-    #     "Polling status: in-progress",
-    #     "Polling status: in-progress",
-    #     "Polling status: in-progress",
-    #     "Polling status: in-progress",
-    #     "Polling status: in-progress",
-    #     "Polling status: in-progress",
-    #     "Polling status: processing",
-    #     "Polling status: done"
-    #   ],
-    #   "error": None,
-    #   "conversation_id": "conv_01jxv205n2f2s96ycrcx00s1cx"
-    # }
-    
-    # return mock_result 
-
-    def log_to_file(message: str):
-        # Do not persist full proposals, contact details or transcripts in logs.
-        return None
-
-    log_to_file("=" * 80)
-    log_to_file("🔍 PHONE CALL FUNCTION DEBUG START")
-    log_to_file("=" * 80)
-        
-    debug_info = {}
-        
-    # Check environment variables
-    log_to_file(f"\n🔧 Checking environment variables...")
-    env_vars = {
-        "ELEVENLABS_API_KEY": "✅ Set" if ELEVENLABS_API_KEY else "❌ Missing",
-        "ELEVENLABS_AGENT_ID": "✅ Set" if ELEVENLABS_AGENT_ID else "❌ Missing", 
-        "ELEVENLABS_PHONE_NUMBER_ID": "✅ Set" if ELEVENLABS_PHONE_NUMBER_ID else "❌ Missing"
-    }
-    
-    for var, status in env_vars.items():
-        log_to_file(f"   {var}: {status}")
-    
-    missing_vars = [var for var, status in env_vars.items() if "❌" in status]
-    if missing_vars:
-        log_to_file(f"\n❌ Missing environment variables: {', '.join(missing_vars)}")
-        log_to_file("Falling back to MOCK call mode.")
-        return {"status": "error", "error": "Call provider configuration is incomplete"}
-    
-    # Make the call
-    log_to_file("⏳ This may take a few minutes depending on call duration...")
-    
-    result = None
-    
-    # Extract key information with flexible key handling
-    if business_data and proposal:
-        debug_info["business_data"] = business_data
-        debug_info["proposal"] = proposal
-        
-        business_phone = business_data.get("phone") or business_data.get("phone_number")
-    
-        debug_info["extracted_phone"] = business_phone
-        
-        log_to_file(f"\n🔍 Validating phone number: {business_phone}")
-        validation = validate_us_phone_number(business_phone)
-
-        if not validation["valid"]:
-            log_to_file(f"❌ Phone number validation failed: {validation['error']}")
-            log_to_file("\n💡 Please edit business_phone in this script with a valid US phone number")
-            return "Try another phone number or format"
-
-        normalized_number = validation["normalized"]
-        log_to_file(f"\n🚀 Initiating call to {normalized_number}...")
-        log_to_file(f"✅ Phone number valid. Normalized: {normalized_number}")
-
-        FIRST_MESSAGE = "Hi, this is Lexi from ZemZen Web Solutions—just spotted some quick wins to boost your business online. Got a minute to chat?"
-        SYSTEM_PROMPT = CALLER_PROMPT.format(
-            business_data= json.dumps(business_data, indent=2),
-            proposal=proposal
-        )
-
-        start_time = time.time()
-        
-        result = await _make_call(
-            to_number=normalized_number, system_prompt=SYSTEM_PROMPT,
-            first_message=FIRST_MESSAGE, poll_interval=2.0,
-        )
-
-        end_time = time.time()
-        
-        log_to_file(" - - - - - ")
-        log_to_file(f"📞 Call completed in {end_time - start_time:.2f} seconds")
-        log_to_file(f"📜 Transcript: {json.dumps(result, indent=2, ensure_ascii=False)}")
-        
-    
-    return result
-
-# High level tool definition for phone call
-phone_call_tool = FunctionTool(func=phone_call)
+phone_call_tool=FunctionTool(func=phone_call)

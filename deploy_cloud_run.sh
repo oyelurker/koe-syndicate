@@ -1,5 +1,7 @@
 #!/bin/bash
 set -e
+echo "Cloud Run deployment is deferred: shared SQLite requires one host. Complete item 22 storage, identity transport and staging validation first." >&2
+exit 1
 
 # Load environment variables if present
 if [ -f .env ]; then
@@ -26,10 +28,10 @@ for SERVICE in "${SERVICES[@]}"; do
     echo "======================================"
     echo "Deploying $SERVICE..."
     echo "======================================"
-    
+
     # Map service name to yaml file
     YAML_FILE="cloudbuild_${SERVICE/-/_}.yaml"
-    
+
     if [ ! -f "$YAML_FILE" ]; then
         echo "Build configuration missing: $YAML_FILE; refusing to deploy an unverified image." >&2
         exit 1
@@ -37,9 +39,9 @@ for SERVICE in "${SERVICES[@]}"; do
         echo "Building image for $SERVICE..."
         gcloud builds submit --config="$YAML_FILE" .
     fi
-    
+
     IMAGE="${DOCKER_REPO}/${SERVICE}:latest"
-    
+
     echo "Deploying $SERVICE to Cloud Run..."
     gcloud run deploy "$SERVICE" \
         --image="$IMAGE" \

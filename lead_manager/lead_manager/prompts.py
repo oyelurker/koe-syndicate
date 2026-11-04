@@ -62,7 +62,7 @@ You are an expert Email Analyzer Agent. Your only job is to analyze the email pr
 ### INSTRUCTIONS
 1.  Carefully analyze the 'Body content' and 'Subject line' of the email data below.
 2.  Look for explicit requests (e.g., "Can we schedule a meeting?") or implicit requests (e.g., "When would be a good time to talk?").
-3.  If a specific date and time is proposed, extract it. The current year is 2025.
+3.  If a specific date and time is proposed, extract it. Use the current date supplied by the workflow; never assume a fixed year.
 4.  **You MUST output your response as a single, valid JSON object.**
 5.  **Enclose the JSON object within a single ```json ... ``` code block.**
 6.  **Do NOT output any other text, explanations, or conversational filler before or after the JSON block.**
@@ -128,7 +128,7 @@ Meeting with John Doe to discuss business opportunities with awesome website cre
 
 📋 Agenda:
 • Introduction and overview
-• Business needs assessment  
+• Business needs assessment
 • Solution presentation
 • Q&A session
 • Next steps discussion

@@ -12,9 +12,9 @@ import logging
 import os
 import sys
 import uuid
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional
 from datetime import datetime
 from enum import Enum
 from dotenv import load_dotenv
@@ -151,12 +151,15 @@ class LeadFinderRequest(BaseModel):
     niche: Optional[str] = Field(None, description="Target business niche or type")
 
 class HumanInputRequest(BaseModel):
+    job_id: str | None = None
+    campaign_id: str | None = None
     request_id: str
     prompt: str
     type: str
     timestamp: str
 
 class HumanInputResponse(BaseModel):
+    campaign_id: str = Field(..., min_length=1, max_length=128)
     request_id: str
     response: str
 
@@ -174,16 +177,20 @@ def empty_pipeline_state():
     }
 
 
-app_state = empty_pipeline_state()
+from .runtime import OwnerRuntime, runtime_owner, PipelineRuntimeMiddleware
+
+app_state = OwnerRuntime(empty_pipeline_state)
 
 # Session Signer
-from common.security import ServiceAuth, SecurityError, require_action, mode
+from common.security import ServiceAuth, SecurityError, require_action, mode, campaign_context
 from .security import BrowserSecurityMiddleware, validate_config
-from .store import Store
+from .store import Store, StoreConflict
 from . import db as token_db
-from common.security import execution, owner_email
+from common.security import Execution, execution, owner_email
+from common.execution_store import WorkStore, PolicyDenied
 
 pipeline_store: Store | None = None
+runtime_worker_id: str | None = None
 
 
 def pipeline_snapshot():
@@ -202,98 +209,212 @@ def restore_pipeline(snapshot):
     app_state.update(snapshot)
     app_state["businesses"] = {key: Business.model_validate(value) for key, value in snapshot.get("businesses", {}).items()}
     app_state["agent_updates"] = [AgentUpdate.model_validate(value) for value in snapshot.get("agent_updates", [])]
-    app_state["human_input_requests"] = {key: HumanInputRequest.model_validate(value) for key, value in snapshot.get("human_input_requests", {}).items()}
+    app_state["human_input_requests"] = {key: HumanInputRequest.model_validate(value)
+        for key, value in snapshot.get("human_input_requests", {}).items()
+        if snapshot.get("session_id") and value.get("campaign_id") == snapshot["session_id"]}
 
 
-async def persist_pipeline(event):
+def campaign_is_current(campaign_id):
+    context = execution.get()
+    view = app_state.current_view() if context else None
+    return bool(context and not (view and view.conflicted) and campaign_id and app_state["session_id"] == campaign_id)
+
+
+def require_current_campaign():
+    context = execution.get()
+    if not context or not campaign_is_current(context.campaign_id):
+        raise SecurityError("Campaign is missing, reset or superseded")
+    if context.job_id:
+        WorkStore().require_job()
+
+
+@asynccontextmanager
+async def pipeline_scope():
+    if pipeline_store is None:
+        raise RuntimeError("Persistent storage has not completed application startup")
+    committed = await asyncio.to_thread(pipeline_store.read_view, runtime_owner())
+    token = app_state.bind(committed["revision"])
+    try:
+        if committed["snapshot"]:
+            restore_pipeline(committed["snapshot"])
+        view = app_state.current_view()
+        view.cursor = committed["cursor"]
+        view.baseline = pipeline_snapshot()
+        yield view
+    finally:
+        view = app_state.current_view()
+        if view.baseline is not None and pipeline_snapshot() == view.baseline:
+            app_state.cache_current()
+        app_state.unbind(token)
+
+
+async def persist_pipeline(event, dispatch=None):
     context = execution.get()
     if context is None:
         raise SecurityError("Missing owner for persistent pipeline update")
+    view = app_state.current_view()
+    if view is None or view.conflicted:
+        raise StoreConflict("A fresh pipeline view is required")
+    if context.campaign_id:
+        require_current_campaign()
     if pipeline_store is None:
         raise RuntimeError("Persistent storage has not completed application startup")
-    await asyncio.to_thread(pipeline_store.save, context.owner, pipeline_snapshot(), json.loads(json.dumps(event, default=str)))
+    snapshot = pipeline_snapshot()
+    try:
+        result = await asyncio.to_thread(pipeline_store.save, context.owner, snapshot,
+            json.loads(json.dumps(event, default=str)), expected_revision=view.revision, worker_id=runtime_worker_id, dispatch=dispatch)
+    except StoreConflict:
+        # Discard this operation's speculative state and stop its later callbacks/finalizers.
+        view.conflicted = True
+        raise
+    view.revision = result["revision"]
+    view.baseline = snapshot
+    return result
+
+
+async def flush_pipeline():
+    view = app_state.current_view()
+    if view and not view.conflicted and pipeline_snapshot() != view.baseline:
+        await persist_pipeline({"type": "state_changed"})
+
 
 class ConnectionManager:
     """Manages WebSocket connections for real-time updates."""
     
-    def __init__(self, persist=None):
-        self.active_connections: Set[WebSocket] = set()
+    def __init__(self, persist=None, durable_delivery=False):
+        self.active_connections: dict[WebSocket, str] = {}
         self.persist = persist
+        self.durable_delivery = durable_delivery
     
     async def connect(self, websocket: WebSocket):
+        owner = runtime_owner()
         await websocket.accept()
-        self.active_connections.add(websocket)
+        self.active_connections[websocket] = owner
         logger.info(f"WebSocket connected. Total connections: {len(self.active_connections)}")
     
     def disconnect(self, websocket: WebSocket):
-        self.active_connections.discard(websocket)
+        self.active_connections.pop(websocket, None)
         logger.info(f"WebSocket disconnected. Total connections: {len(self.active_connections)}")
     
-    async def send_update(self, data: dict[str, Any]):
-        """Send update to all connected clients."""
+    async def send_update(self, data: dict[str, Any], dispatch=None):
+        """Persist and publish only within the verified owner's current view."""
+        owner = runtime_owner()
+        if self.durable_delivery and app_state.current_view() is None:
+            async with pipeline_scope():
+                return await self.send_update(data, dispatch=dispatch)
+        context = execution.get()
+        campaign = context.campaign_id or app_state["session_id"]
+        if context.campaign_id:
+            require_current_campaign()
         if self.persist is not None:
-            await self.persist(data)
-        if not self.active_connections:
+            if dispatch is None:
+                await self.persist(data)
+            else:
+                await self.persist(data, dispatch=dispatch)
+        if self.durable_delivery:
             return
-        
-        message = json.dumps(data, default=str)
-        disconnected = set()
-        
-        for connection in self.active_connections:
+        envelope = {**data, "campaign_id": campaign}
+        message = json.dumps(envelope, default=str)
+        # Snapshot membership: a disconnect/connect may happen while sending.
+        for connection, connection_owner in list(self.active_connections.items()):
+            if connection_owner != owner:
+                continue
+            # Recheck after every await; reset/new search invalidates old events.
+            if app_state["session_id"] != campaign:
+                return
+            if self.active_connections.get(connection) != owner:
+                continue
             try:
                 await connection.send_text(message)
-            except Exception as e:
-                logger.error(f"Error sending WebSocket message: {e}")
-                disconnected.add(connection)
-        
-        # Remove disconnected clients
-        for connection in disconnected:
-            self.disconnect(connection)
+            except Exception:
+                logger.warning("WebSocket delivery failed; disconnecting client")
+                self.disconnect(connection)
 
-manager = ConnectionManager(persist=persist_pipeline)
+manager = ConnectionManager(persist=persist_pipeline, durable_delivery=True)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Handles application startup and shutdown events."""
-    global pipeline_store
+    global pipeline_store, runtime_worker_id
     validate_config()
     logger.info("UI Client starting up...")
     
     # Initialize SQLite database
     await db.init_db()
     store = Store(token_db.DB_PATH)
-    app_state.clear()
-    app_state.update(empty_pipeline_state())
-    await asyncio.to_thread(store.interrupt_incomplete, owner_email())
-    restored = await asyncio.to_thread(store.load, owner_email())
-    if restored:
-        restore_pipeline(restored)
-    pipeline_store = store
-    logger.info("Database initialized successfully.")
+    runtime_worker_id = str(uuid.uuid4())
+    await asyncio.to_thread(store.heartbeat, runtime_worker_id)
+    token = execution.set(Execution(owner_email(), mode()))
+    try:
+        app_state.clear_all()
+        manager.active_connections.clear()
+        app_state.update(empty_pipeline_state())
+        await asyncio.to_thread(store.interrupt_incomplete, owner_email())
+        restored = await asyncio.to_thread(store.read_view, owner_email())
+        if restored["snapshot"]:
+            restore_pipeline(restored["snapshot"])
+        app_state._revisions[runtime_owner()] = restored["revision"]
+        pipeline_store = store
+        logger.info("Database initialized successfully.")
 
-    # ── NVIDIA RAPIDS: Pre-score demo leads at startup ────────────────────────
-    if RAPIDS_SCORING_AVAILABLE and not app_state["lead_scores"]:
-        try:
-            _demo_path = Path(__file__).parent.parent / "demo_leads.json"
-            if _demo_path.exists():
-                with open(_demo_path, "r") as _f:
-                    _demo_leads = json.load(_f)
-                app_state["lead_scores"] = _rapids_score_leads(_demo_leads)
-                logger.info(f"[RAPIDS] Scored {len(app_state['lead_scores'])} leads at startup.")
-            else:
-                logger.warning("[RAPIDS] demo_leads.json not found — scores unavailable until leads are generated.")
-        except Exception as _e:
-            logger.warning(f"[RAPIDS] Startup scoring failed: {_e}")
-    elif not RAPIDS_SCORING_AVAILABLE:
-        logger.warning("[RAPIDS] Scoring engine not loaded — /api/lead-scores will return empty.")
+        # ── NVIDIA RAPIDS: Pre-score demo leads at startup ────────────────────────
+        if RAPIDS_SCORING_AVAILABLE and not app_state["lead_scores"]:
+            try:
+                _demo_path = Path(__file__).parent.parent / "demo_leads.json"
+                if _demo_path.exists():
+                    with open(_demo_path, "r") as _f:
+                        _demo_leads = json.load(_f)
+                    app_state["lead_scores"] = _rapids_score_leads(_demo_leads)
+                    logger.info(f"[RAPIDS] Scored {len(app_state['lead_scores'])} leads at startup.")
+                else:
+                    logger.warning("[RAPIDS] demo_leads.json not found — scores unavailable until leads are generated.")
+            except Exception as _e:
+                logger.warning(f"[RAPIDS] Startup scoring failed: {_e}")
+        elif not RAPIDS_SCORING_AVAILABLE:
+            logger.warning("[RAPIDS] Scoring engine not loaded — /api/lead-scores will return empty.")
+        if pipeline_snapshot() != (restored["snapshot"] or empty_pipeline_state()) and app_state["lead_scores"]:
+            try:
+                initialized = await asyncio.to_thread(store.save, owner_email(), pipeline_snapshot(),
+                    {"type": "scores_initialized"}, expected_revision=restored["revision"], worker_id=runtime_worker_id)
+                app_state._revisions[runtime_owner()] = initialized["revision"]
+            except StoreConflict:
+                latest = await asyncio.to_thread(store.read_view, owner_email())
+                app_state.clear()
+                app_state.update(empty_pipeline_state())
+                if latest["snapshot"]:
+                    restore_pipeline(latest["snapshot"])
 
+    finally:
+        execution.reset(token)
+
+    async def renew_worker():
+        while True:
+            await asyncio.sleep(20)
+            try:
+                await asyncio.to_thread(store.heartbeat, runtime_worker_id)
+                await asyncio.to_thread(store.interrupt_incomplete, owner_email())
+            except Exception:
+                logger.error("Worker lease renewal failed; expired leases deny further writes")
+    heartbeat_task = asyncio.create_task(renew_worker())
+    dispatcher_task = asyncio.create_task(dispatch_loop())
     try:
         yield
     finally:
+        dispatcher_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await dispatcher_task
+        heartbeat_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await heartbeat_task
+        await asyncio.to_thread(store.release_worker, runtime_worker_id)
+        runtime_worker_id = None
         pipeline_store = None
+        app_state.clear_all()
+        manager.active_connections.clear()
         logger.info("UI Client shutting down...")
 
 app = FastAPI(lifespan=lifespan, debug=False, docs_url=None, redoc_url=None, openapi_url=None)
+app.add_middleware(PipelineRuntimeMiddleware, scope_factory=pipeline_scope, flush=flush_pipeline)
 app.add_middleware(BrowserSecurityMiddleware)
 
 # Add CORS Middleware to allow requests from the frontend with cookies
@@ -395,6 +516,8 @@ from .auth_routes import router as auth_router
 from .calendar_routes import router as calendar_router
 app.include_router(auth_router)
 app.include_router(calendar_router)
+from .execution_routes import router as execution_router
+app.include_router(execution_router)
 
 async def call_lead_finder_agent_a2a(city: str, session_id: str, **kwargs) -> dict[str, Any]:
     """
@@ -415,7 +538,7 @@ async def call_lead_finder_agent_a2a(city: str, session_id: str, **kwargs) -> di
     }
     
     try:
-        async with httpx.AsyncClient(auth=ServiceAuth("ui-client", "lead-finder"), ) as http_client:
+        async with httpx.AsyncClient(auth=ServiceAuth("ui-client", "lead-finder", campaign_context(session_id)), ) as http_client:
             a2a_client = A2AClient(httpx_client=http_client, url=lead_finder_url)
             
             # Prepare A2A message
@@ -553,7 +676,7 @@ async def call_lead_finder_agent_simple(city: str, session_id: str, **kwargs) ->
     }
     
     try:
-        async with httpx.AsyncClient(auth=ServiceAuth("ui-client", "lead-finder"), timeout=300.0) as client:
+        async with httpx.AsyncClient(auth=ServiceAuth("ui-client", "lead-finder", campaign_context(session_id)), timeout=300.0) as client:
             # Try different endpoints that might exist
             endpoints_to_try = [
                 f"{lead_finder_url}/find_leads",
@@ -623,7 +746,7 @@ async def call_lead_finder_agent(city: str, session_id: str, **kwargs) -> dict[s
             "success": True,
             "businesses": [
                 {
-                    "id": str(uuid.uuid4()),
+                    "id": str(uuid.uuid5(uuid.NAMESPACE_URL, "koe-demo:"+city+":alpha")),
                     "name": f"Demo Lead Alpha - {city}",
                     "phone": "+1-555-0101",
                     "email": "contact@demoleadalpha.com",
@@ -633,7 +756,7 @@ async def call_lead_finder_agent(city: str, session_id: str, **kwargs) -> dict[s
                     "notes": ["Generated via Mock Mode"]
                 },
                 {
-                    "id": str(uuid.uuid4()),
+                    "id": str(uuid.uuid5(uuid.NAMESPACE_URL, "koe-demo:"+city+":beta")),
                     "name": f"Demo Lead Beta - {city}",
                     "phone": "+1-555-0102",
                     "email": "hello@demoleadbeta.com",
@@ -670,7 +793,7 @@ async def call_sdr_agent_a2a(business_data: dict[str, Any], session_id: str) -> 
     }
     
     try:
-        async with httpx.AsyncClient(auth=ServiceAuth("ui-client", "sdr"), timeout=300.0) as http_client:
+        async with httpx.AsyncClient(auth=ServiceAuth("ui-client", "sdr", campaign_context(session_id)), timeout=300.0) as http_client:
             a2a_client = A2AClient(httpx_client=http_client, url=sdr_url)
             
             # Prepare A2A message
@@ -752,7 +875,7 @@ async def call_sdr_agent_simple(business_data: dict[str, Any], session_id: str) 
     }
     
     try:
-        async with httpx.AsyncClient(auth=ServiceAuth("ui-client", "sdr"), timeout=300.0) as client:
+        async with httpx.AsyncClient(auth=ServiceAuth("ui-client", "sdr", campaign_context(session_id)), timeout=300.0) as client:
             # Try different endpoints that might exist
             endpoints_to_try = [
                 # f"{sdr_url}/engage_lead",
@@ -821,7 +944,7 @@ async def call_lead_manager_agent_a2a(query: str, session_id: str) -> dict[str, 
     }
     
     try:
-        async with httpx.AsyncClient(auth=ServiceAuth("ui-client", "lead-manager"), ) as http_client:
+        async with httpx.AsyncClient(auth=ServiceAuth("ui-client", "lead-manager", campaign_context(session_id)), ) as http_client:
             a2a_client = A2AClient(httpx_client=http_client, url=lead_manager_url)
             
             # Prepare A2A message
@@ -921,7 +1044,7 @@ async def call_lead_manager_agent_simple(query: str, session_id: str) -> dict[st
     }
     
     try:
-        async with httpx.AsyncClient(auth=ServiceAuth("ui-client", "lead-manager"), ) as http_client:
+        async with httpx.AsyncClient(auth=ServiceAuth("ui-client", "lead-manager", campaign_context(session_id)), ) as http_client:
             payload = {
                 "query": query,
                 "ui_client_url": config.DEFAULT_UI_CLIENT_URL
@@ -963,15 +1086,137 @@ async def call_lead_manager_agent(query: str, session_id: str) -> dict[str, Any]
     else:
         return await call_lead_manager_agent_simple(query, session_id)
 
+def service_url_for_sdr():
+    from common.security import service_url
+    return service_url("sdr")
+
+
+async def run_durable_job(job):
+    context = Execution(owner_email(), job["mode"], job["campaign"], job["id"], job["claim_token"])
+    store = WorkStore()
+    token = execution.set(context)
+    current = asyncio.current_task()
+    async def renew_claim():
+        while True:
+            await asyncio.sleep(10)
+            try:
+                await asyncio.to_thread(store.renew, context)
+            except Exception:
+                current.cancel()
+                return
+    renewal = asyncio.create_task(renew_claim())
+    try:
+        if job["kind"] == "action":
+            proposal = await asyncio.to_thread(store.proposal,job["payload"]["action_key"])
+            if not proposal:
+                raise PolicyDenied("Approved action not found")
+            payload = json.loads(proposal["payload"])
+            if proposal["kind"] in {"calls","email"}:
+                async with httpx.AsyncClient(auth=ServiceAuth("ui-client","sdr"),timeout=660) as client:
+                    response=await client.post(service_url_for_sdr()+"/internal/actions/"+job["payload"]["action_key"]+"/execute",json={})
+                    response.raise_for_status()
+                    output=response.json()
+            else:
+                from .calendar_routes import meeting,Meeting
+                output = await meeting(Meeting.model_validate(payload))
+                if isinstance(output,JSONResponse):
+                    output = json.loads(output.body)
+            result = {"success":output.get("success") is True or output.get("status") in {"success","done"},"provider_result":output}
+            if result["success"]:
+                async with pipeline_scope():
+                    require_current_campaign()
+                    from common.execution_store import normalize_phone,normalize_email
+                    matched=[]
+                    for business in app_state["businesses"].values():
+                        with suppress(SecurityError):
+                            recipient=normalize_phone(business.phone) if proposal["kind"]=="calls" else normalize_email(business.email)
+                            if recipient in json.loads(proposal["recipients"]):
+                                matched.append(business.id)
+                    if len(matched)==1 or proposal["kind"]=="calendar":
+                        await agent_callback(AgentUpdate(agent_type=AgentType.CALENDAR if proposal["kind"]=="calendar" else AgentType.SDR,
+                            business_id=matched[0] if len(matched)==1 else "unknown_business",
+                            status=BusinessStatus.MEETING_SCHEDULED if proposal["kind"]=="calendar" else BusinessStatus.CONTACTED,
+                            message="Provider confirmed the approved action",data={**output,"action_key":job["payload"]["action_key"]}))
+
+        elif job["kind"] == "discovery":
+            result = await run_lead_finding_process(job["payload"]["city"],job["campaign"],job["payload"].get("niche", ""))
+        else:
+            async with pipeline_scope():
+                require_current_campaign()
+                if job["kind"] == "sdr":
+                    result = await call_sdr_agent(job["payload"]["business"],job["campaign"])
+                else:
+                    result = await call_lead_manager_agent(job["payload"]["query"],job["campaign"])
+                require_current_campaign()
+                await manager.send_update({"type":"job_result","job_id":job["id"],"success":bool(result.get("success"))})
+        await asyncio.to_thread(store.finish_job,context,result,
+            None if result and result.get("success") else "Workflow did not confirm success")
+    except asyncio.CancelledError:
+        with suppress(Exception):
+            await asyncio.to_thread(store.finish_job,context,None,"Consumer stopped; outcome unresolved")
+        raise
+    except Exception:
+        with suppress(Exception):
+            await asyncio.to_thread(store.finish_job,context,None,"Workflow failed or provider outcome is uncertain")
+        logger.warning("Durable job did not complete; see owner job ledger")
+    finally:
+        renewal.cancel()
+        with suppress(asyncio.CancelledError):
+            await renewal
+        execution.reset(token)
+
+
+async def dispatch_loop():
+    while True:
+        await asyncio.sleep(0.25)
+        try:
+            job = await asyncio.to_thread(WorkStore().claim,owner_email(),runtime_worker_id,mode())
+            if job:
+                # A cancelled claim must not stop the lifespan consumer.
+                task = asyncio.create_task(run_durable_job(job))
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    if asyncio.current_task().cancelling():
+                        task.cancel()
+                        with suppress(asyncio.CancelledError):
+                            await task
+                        raise
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.error("Durable dispatcher unavailable; no provider work dispatched")
+            await asyncio.sleep(1)
+
+
 async def run_lead_finding_process(city: str, session_id: str, niche: str = ""):
+    token = execution.set(campaign_context(session_id))
+    try:
+        if pipeline_store is not None:
+            async with pipeline_scope():
+                if campaign_is_current(session_id):
+                    return await _run_lead_finding_process(city, session_id, niche)
+        elif campaign_is_current(session_id):
+            return await _run_lead_finding_process(city, session_id, niche)
+    except StoreConflict:
+        logger.info("Discarded obsolete discovery result after a competing commit")
+    finally:
+        execution.reset(token)
+
+
+async def _run_lead_finding_process(city: str, session_id: str, niche: str = ""):
     """Run the complete lead finding process."""
     business_logger = logging.getLogger(BUSINESS_LOGIC_LOGGER)
+    outcome = {"success": False, "error": "Discovery did not complete"}
     
     try:
         business_logger.info(f"Starting lead finding process for {city}")
         
         # Call Lead Finder agent
         result = await call_lead_finder_agent(city, session_id, niche=niche)
+        if not campaign_is_current(session_id):
+            return
+        outcome = result
         
         if result["success"]:
             found_businesses = result.get("businesses", [])
@@ -979,8 +1224,12 @@ async def run_lead_finding_process(city: str, session_id: str, niche: str = ""):
             
             # Store businesses in UI state and notify the dashboard
             for b_data in found_businesses:
+                if not campaign_is_current(session_id):
+                    return
                 try:
-                    biz_id = b_data.get("id", str(uuid.uuid4()))
+                    import hashlib
+                    stable_id = hashlib.sha256(json.dumps([city,b_data.get("name"),b_data.get("phone")],sort_keys=True).encode()).hexdigest()
+                    biz_id = b_data.get("id") or stable_id
                     new_biz = Business(
                         id=biz_id,
                         name=b_data.get("name") or "Unknown Business",
@@ -1006,6 +1255,8 @@ async def run_lead_finding_process(city: str, session_id: str, niche: str = ""):
                         },
                         "timestamp": datetime.now().isoformat(),
                     })
+                except StoreConflict:
+                    raise
                 except Exception as e:
                     business_logger.error(f"Error processing business lead: {e}")
 
@@ -1035,7 +1286,11 @@ async def run_lead_finding_process(city: str, session_id: str, niche: str = ""):
                 "timestamp": datetime.now().isoformat(),
             })
     
+    except StoreConflict:
+        raise
     except Exception as e:
+        if not campaign_is_current(session_id):
+            return
         business_logger.error(f"Error in lead finding process: {e}", exc_info=True)
         await manager.send_update({
             "type": "lead_finding_failed",
@@ -1044,31 +1299,58 @@ async def run_lead_finding_process(city: str, session_id: str, niche: str = ""):
         })
     
     finally:
-        # The process is no longer running, regardless of outcome
-        app_state["is_running"] = False
-        # Also send an update to the UI so it can re-enable buttons etc.
-        await manager.send_update({
-            "type": "process_finished",
-            "timestamp": datetime.now().isoformat(),
-        })
+        # Old work must never finish or publish into a reset/newer campaign.
+        if campaign_is_current(session_id):
+            app_state["is_running"] = False
+            await manager.send_update({
+                "type": "process_finished",
+                "timestamp": datetime.now().isoformat(),
+            })
+    return outcome
 
-# WebSocket endpoint for real-time updates
+def socket_snapshot(snapshot, revision):
+    snapshot = snapshot or empty_pipeline_state()
+    return {"type": "initial_state", "campaign_id": snapshot.get("session_id"), "revision": revision,
+            "businesses": list(snapshot.get("businesses", {}).values()),
+            "current_city": snapshot.get("current_city"), "is_running": snapshot.get("is_running", False)}
+
+
+async def deliver_socket_events(websocket, cursor, revision):
+    """Consume a bounded committed owner outbox; works across local UI workers."""
+    batch = await asyncio.to_thread(pipeline_store.read_view, runtime_owner(), cursor)
+    campaign = (batch["snapshot"] or {}).get("session_id")
+    for event in batch["events"]:
+        if event["campaign_id"] == campaign:
+            await websocket.send_text(json.dumps({**event["payload"], "event_id": event["id"]}, default=str))
+        cursor = event["id"]
+    if cursor >= batch["cursor"] and revision != batch["revision"]:
+        await websocket.send_text(json.dumps(socket_snapshot(batch["snapshot"], batch["revision"]), default=str))
+        revision = batch["revision"]
+    return cursor, revision
+
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await manager.connect(websocket)
     try:
-        # Send current state to newly connected client
-        await websocket.send_text(json.dumps({
-            "type": "initial_state",
-            "businesses": [business.model_dump() for business in app_state["businesses"].values()],
-            "current_city": app_state["current_city"],
-            "is_running": app_state["is_running"],
-        }, default=str))
-        
-        # Keep connection alive
+        view = app_state.current_view()
+        cursor, revision = view.cursor, view.revision
+        await websocket.send_text(json.dumps(socket_snapshot(pipeline_snapshot(), revision), default=str))
         while True:
-            await websocket.receive_text()
+            try:
+                await asyncio.wait_for(websocket.receive_text(), timeout=0.5)
+            except asyncio.TimeoutError:
+                pass
+            # Validate even during quiet periods, including a logout on another worker.
+            from .security import session_user
+            _, user = await session_user(websocket.scope)
+            if user is None:
+                await websocket.close(code=1008)
+                return
+            cursor, revision = await deliver_socket_events(websocket, cursor, revision)
     except WebSocketDisconnect:
+        pass
+    finally:
         manager.disconnect(websocket)
 
 # Agent callback endpoint
@@ -1086,6 +1368,18 @@ async def agent_callback(update: AgentUpdate):
     This version handles creating new businesses and correctly serializes
     Pydantic models before sending them over WebSockets.
     """
+    try:
+        require_current_campaign()
+    except SecurityError:
+        return JSONResponse({"error": "Campaign is missing, reset or superseded"}, status_code=409)
+
+    if update.status in {BusinessStatus.CONTACTED,BusinessStatus.MEETING_SCHEDULED}:
+        receipt = update.data or {}
+        kind = "calendar" if update.status == BusinessStatus.MEETING_SCHEDULED else ("calls" if receipt.get("conversation_id") else "email")
+        provider_id = receipt.get("meeting_id") or receipt.get("conversation_id") or receipt.get("message_id")
+        if not WorkStore().confirmed(receipt.get("action_key"),kind,provider_id):
+            return JSONResponse({"error":"No confirmed durable provider receipt"},409)
+
     logger.info(f"Received agent callback: {update.agent_type} for business {update.business_id}")
 
     # Special handling for Calendar agent: do not auto-create businesses, only send meeting notifications
@@ -1157,6 +1451,12 @@ async def agent_callback(update: AgentUpdate):
 
     # Get the final business object to send in the update
     final_business_obj = app_state["businesses"].get(update.business_id)
+    if final_business_obj and update.status == BusinessStatus.NOT_INTERESTED:
+        for recipient in (final_business_obj.email, final_business_obj.phone):
+            if recipient:
+                with suppress(SecurityError):
+                    await asyncio.to_thread(WorkStore().suppress,recipient,"Recipient opted out")
+
     # Handle calendar events: first send a business_updated to move/create the card,
     # then send a calendar_notification with meeting details
     if update.agent_type == AgentType.CALENDAR and final_business_obj:
@@ -1227,9 +1527,12 @@ async def start_lead_finding(city: str = Form(...), niche: str = Form(None)):
         
         app_state["is_running"] = True
         app_state["current_city"] = request_data.city
-        app_state["session_id"] = str(uuid.uuid4())
+        session_id = str(uuid.uuid4())
+        app_state["session_id"] = session_id
         app_state["businesses"] = {}  # Reset businesses for new search
         app_state["agent_updates"] = []  # Reset updates
+        app_state["human_input_requests"] = {}
+        app_state["lead_scores"] = {}
         
         logger.info(f"Starting lead finding process for city: {request_data.city}")
         
@@ -1238,10 +1541,7 @@ async def start_lead_finding(city: str = Form(...), niche: str = Form(None)):
             "type": "process_started",
             "city": request_data.city,
             "timestamp": datetime.now().isoformat(),
-        })
-        
-        # Call Lead Finder agent asynchronously
-        asyncio.create_task(run_lead_finding_process(request_data.city, app_state["session_id"], request_data.niche))
+        }, dispatch={"kind":"discovery","payload":{"city":request_data.city,"niche":request_data.niche or ""},"mode":mode()})
         
         return RedirectResponse("/", status_code=303)
         
@@ -1251,6 +1551,8 @@ async def start_lead_finding(city: str = Form(...), niche: str = Form(None)):
             status_code=400,
             content={"error": f"Invalid input: {e}"}
         )
+    except StoreConflict:
+        raise
     except Exception as e:
         logger.error(f"Error starting lead finding: {e}", exc_info=True)
         app_state["is_running"] = False
@@ -1298,7 +1600,7 @@ async def send_business_to_sdr(
         business = app_state["businesses"][business_id]
         
         # Convert business to dict for sending to SDR
-        business_data = business.model_dump()
+        business_data = business.model_dump(mode="json")
         
         # Override phone number if user provided one
         if user_phone:
@@ -1306,34 +1608,25 @@ async def send_business_to_sdr(
             business_data["phone"] = user_phone
             logger.info(f"Overriding phone number to: {user_phone} for business {business.name}")
         
+        from common.execution_store import normalize_phone
+        try:
+            business_data["phone"] = normalize_phone(business_data.get("phone") or business_data.get("phone_number"))
+            business_data["phone_number"] = business_data["phone"]
+        except SecurityError as exc:
+            return JSONResponse({"error":str(exc),"error_category":"validation"},422)
         # Get current session ID
-        session_id = app_state["session_id"] or str(uuid.uuid4())
+        session_id = app_state["session_id"]
+        if not session_id:
+            return JSONResponse({"error": "Start a campaign before contacting a lead"}, status_code=409)
         
         logger.info(f"Sending business {business.name} to SDR agent")
         
-        # Call SDR agent
-        result = await call_sdr_agent(business_data, session_id)
-        
-        if result["success"]:
-            # Send success update via WebSocket
-            await manager.send_update({
-                "type": "sdr_engaged",
-                "business_id": business_id,
-                "business_name": business.name,
-                "message": result["message"],
-                "timestamp": datetime.now().isoformat(),
-            })
-            
-            return JSONResponse(
-                status_code=200,
-                content={"success": True, "message": result["message"]}
-            )
-        else:
-            return JSONResponse(
-                status_code=500,
-                content={"error": result["error"]}
-            )
-            
+        queued = await persist_pipeline({"type":"job_queued","agent":"sdr"},
+            dispatch={"kind":"sdr","payload":{"business":business_data},"mode":mode()})
+        return JSONResponse({"success":True,"job_id":queued["job_id"],"message":"Outreach queued; no provider action is confirmed"},202)
+
+    except StoreConflict:
+        raise
     except Exception as e:
         logger.error(f"Error sending business to SDR: {e}", exc_info=True)
         return JSONResponse(
@@ -1349,6 +1642,8 @@ async def reset_state():
     app_state["businesses"] = {}
     app_state["agent_updates"] = []
     app_state["session_id"] = None
+    app_state["human_input_requests"] = {}
+    app_state["lead_scores"] = {}
     
     await manager.send_update({
         "type": "state_reset",
@@ -1359,131 +1654,29 @@ async def reset_state():
 
 @app.post("/trigger_lead_manager")
 async def trigger_lead_manager():
-    """Trigger the Lead Manager agent manually."""
     if mode() != "live":
-        return JSONResponse({"error": "Live workflow disabled in demo mode"}, status_code=403)
-    logger.info("Manual trigger for Lead Manager agent requested")
-    
-    try:
-        # Get or create session ID
-        session_id = app_state.get("session_id")
-        if not session_id:
-            session_id = str(uuid.uuid4())
-            app_state["session_id"] = session_id
-        
-        # Check for Mock Mode
-        if os.environ.get("MOCK_SDR", "").lower() == "true":
-            # Send initial update
-            await manager.send_update({
-                "type": "agent_status",
-                "agent": "lead_manager",
-                "status": "active",
-                "message": "Lead Manager mock agent triggered manually",
-                "timestamp": datetime.now().isoformat(),
-            })
-            
-            # Simulate processing delay
-            import asyncio
-            await asyncio.sleep(1.5)
-            
-            # Simulate incoming email
-            await manager.send_update({
-                "type": "agent_status",
-                "agent": "lead_manager",
-                "status": "working",
-                "message": "📥 Received email reply from Demo Lead Alpha: 'Yes, we are interested in your services. Can we hop on a call this Thursday at 2 PM to discuss?'",
-                "timestamp": datetime.now().isoformat(),
-            })
-            
-            await asyncio.sleep(2)
-            
-            # Simulate CRM action
-            await manager.send_update({
-                "type": "agent_status",
-                "agent": "lead_manager",
-                "status": "idle",
-                "message": "✅ Lead recorded in CRM. Follow-up meeting scheduled for Thursday at 2 PM.",
-                "timestamp": datetime.now().isoformat(),
-            })
-            
-            return JSONResponse(
-                status_code=200,
-                content={"status": "success", "message": "Mock email processed"}
-            )
-        
-        # Real Mode Execution
-        # Send initial update
-        await manager.send_update({
-            "type": "agent_status",
-            "agent": "lead_manager",
-            "status": "active",
-            "message": "Lead Manager agent triggered manually",
-            "timestamp": datetime.now().isoformat(),
-        })
-        
-        # Call Lead Manager agent
-        result = await call_lead_manager_agent("check_lead_emails", session_id)
-        
-        if result["success"]:
-            logger.info(f"Lead Manager agent triggered successfully: {result['message']}")
-            
-            # Send success update
-            await manager.send_update({
-                "type": "agent_status", 
-                "agent": "lead_manager",
-                "status": "idle",
-                "message": result["message"] or "Lead management completed successfully",
-                "timestamp": datetime.now().isoformat(),
-            })
-            
-            return JSONResponse(
-                status_code=200,
-                content={
-                    "status": "success",
-                    "message": result["message"] or "Lead Manager agent triggered successfully",
-                    "timestamp": datetime.now().isoformat()
-                }
-            )
-        else:
-            logger.debug(f"Lead Manager agent failed: {result['error']}")
-            
-            # Send error update
-            await manager.send_update({
-                "type": "agent_status",
-                "agent": "lead_manager", 
-                "status": "error",
-                "message": f"Error: {result['error']}",
-                "timestamp": datetime.now().isoformat(),
-            })
-            
-            return JSONResponse(
-                status_code=500,
-                content={"error": result["error"]}
-            )
-            
-    except Exception as e:
-        logger.error(f"Error triggering Lead Manager agent: {e}", exc_info=True)
-        
-        # Send error update
-        await manager.send_update({
-            "type": "agent_status",
-            "agent": "lead_manager",
-            "status": "error", 
-            "message": f"Error triggering agent: {e}",
-            "timestamp": datetime.now().isoformat(),
-        })
-        
-        return JSONResponse(
-            status_code=500,
-            content={"error": f"Failed to trigger Lead Manager: {e}"}
-        )
+        return JSONResponse({"error":"Live workflow disabled in demo mode"},403)
+    if not app_state["session_id"]:
+        return JSONResponse({"error":"Start a campaign first"},409)
+    queued = await persist_pipeline({"type":"job_queued","agent":"lead_manager"},
+        dispatch={"kind":"lead_manager","payload":{"query":"check_lead_emails"},"mode":mode()})
+    return JSONResponse({"success":True,"job_id":queued["job_id"],"message":"Lead Manager queued"},202)
 
 @app.post("/api/human-input")
 async def receive_human_input_request(request: HumanInputRequest):
     """Receive a human input request from agents."""
     logger.info(f"Received human input request: {request.request_id} - {request.type}")
     
-    # Store the request
+    try:
+        require_current_campaign()
+    except SecurityError:
+        return JSONResponse({"error": "Campaign is missing, reset or superseded"}, status_code=409)
+
+    campaign = execution.get().campaign_id
+    if request.campaign_id is not None and request.campaign_id != campaign:
+        return JSONResponse({"error": "Request campaign does not match signer"}, status_code=409)
+    request = request.model_copy(update={"campaign_id": campaign,"job_id":execution.get().job_id})
+    # Store only the provenance verified from the service signature.
     app_state["human_input_requests"][request.request_id] = request
     
     # Send notification to all connected WebSocket clients
@@ -1506,7 +1699,7 @@ async def receive_human_input_request(request: HumanInputRequest):
 async def get_pending_human_input_requests():
     """Get all pending human input requests."""
     return {
-        "requests": [req.dict() for req in app_state["human_input_requests"].values()],
+        "requests": [req.model_dump() for req in app_state["human_input_requests"].values()],
         "count": len(app_state["human_input_requests"])
     }
 
@@ -1521,15 +1714,26 @@ async def submit_human_input_response(request_id: str, response: HumanInputRespo
     
     # Get the request first (but don't remove it yet)
     original_request = app_state["human_input_requests"].get(request_id)
-    
+    session_id = app_state["session_id"]
+    if (response.request_id != request_id or response.campaign_id != session_id
+            or original_request.campaign_id != session_id):
+        return JSONResponse({"error": "Approval does not belong to the active campaign"}, status_code=409)
+
     logger.info("Human input response submitted for %s", request_id)
     
     # Try to notify the human creation tool via HTTP callback to SDR agent
     success = False
     agent_url = os.environ.get("SDR_SERVICE_URL", config.DEFAULT_SDR_URL).rstrip("/")
     callback_url = f"{agent_url}/api/human-input/{request_id}"
+    approval_context = campaign_context(session_id)
+    if original_request.job_id:
+        with WorkStore().connection() as connection:
+            job=connection.execute("SELECT * FROM dispatch_jobs WHERE owner=? AND id=? AND state='running'",(execution.get().owner,original_request.job_id)).fetchone()
+            if not job:
+                return JSONResponse({"error":"Approval job is no longer active"},409)
+            approval_context=Execution(execution.get().owner,job['mode'],session_id,job['id'],job['claim_token'])
     try:
-        async with httpx.AsyncClient(auth=ServiceAuth("ui-client", "sdr"), timeout=10.0) as client:
+        async with httpx.AsyncClient(auth=ServiceAuth("ui-client", "sdr", approval_context), timeout=10.0) as client:
             agent_resp = await client.post(
                 callback_url,
                 json={"url": response.response},
@@ -1545,9 +1749,13 @@ async def submit_human_input_response(request_id: str, response: HumanInputRespo
     except Exception as e:
         logger.error(f"Error notifying SDR agent for request {request_id}: {e}")
     
-    # Only remove the request from UI state AFTER successful processing
-    if success:
-        app_state["human_input_requests"].pop(request_id, None)
+    if not campaign_is_current(session_id):
+        return JSONResponse({"error": "Campaign was reset or superseded"}, status_code=409)
+
+    if not success:
+        return JSONResponse({"error": "Approval delivery failed; request remains pending"}, status_code=503)
+    # Only remove the request after successful processing by the matching agent.
+    app_state["human_input_requests"].pop(request_id, None)
     
     # Send WebSocket notification that response was submitted
     await manager.send_update({

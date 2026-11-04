@@ -32,6 +32,9 @@ async def notify_meeting_arranged(
     """
     if meeting_data.get("success") is not True or not meeting_data.get("meeting_id"):
         return {"success": False, "error": "No confirmed Calendar event; meeting notification withheld"}
+    from common.execution_store import WorkStore
+    if not WorkStore().confirmed(meeting_data.get('action_key'),'calendar',meeting_data.get('meeting_id')):
+        return {"success":False,"error":"Meeting has no durable provider receipt"}
     try:
         logger.info("📤 Sending meeting arrangement notification to UI...")
         
@@ -56,6 +59,7 @@ async def notify_meeting_arranged(
                 "lead_phone": lead_data.get("phone", ""),
                 
                 # Meeting information
+                "action_key": meeting_data.get("action_key"),
                 "meeting_id": meeting_data.get("meeting_id", ""),
                 "meeting_title": meeting_data.get("title", ""),
                 "meeting_start": meeting_data.get("start_time", ""),

@@ -1,8 +1,9 @@
-from common.security import ServiceAuth
+from common.security import ServiceAuth, SecurityError, campaign_context, execution
 "This module provides a tool for human creation of websites based on a given prompt."
 
 import asyncio
 import uuid
+import hashlib
 import logging
 from datetime import datetime
 from typing import Dict, Any, Optional
@@ -35,8 +36,8 @@ class HumanRequest:
 
 class HumanInteractionManager:
     _instance = None
-    _pending_requests: Dict[str, HumanRequest] = {}
-    _active_sessions: set = set()  # Track active sessions to prevent duplicates
+    _pending_requests: Dict[tuple[str, str, str, str], HumanRequest] = {}
+    _active_sessions: set[tuple[str, str, str, str]] = set()  # Track active sessions to prevent duplicates
     
     def __new__(cls):
         if cls._instance is None:
@@ -44,35 +45,44 @@ class HumanInteractionManager:
         return cls._instance
     
     def create_request(self, prompt: str) -> str:
-        request_id = str(uuid.uuid4())[:8]
+        self._key("")
+        request_id = str(uuid.uuid4())
         request = HumanRequest(request_id=request_id, prompt=prompt)
-        self._pending_requests[request_id] = request
+        self._pending_requests[self._key(request_id)] = request
         return request_id
     
+    def _key(self, value):
+        context = execution.get()
+        if context is None or not context.campaign_id:
+            raise SecurityError("Human requests require verified owner and campaign")
+        verified = campaign_context(context.campaign_id)
+        return verified.owner.strip().lower(), verified.campaign_id, verified.job_id or "", value
+
     def get_request(self, request_id: str) -> Optional[HumanRequest]:
-        return self._pending_requests.get(request_id)
-    
+        return self._pending_requests.get(self._key(request_id))
+
     def update_request(self, request_id: str, url: str):
-        if request_id in self._pending_requests:
-            self._pending_requests[request_id].status = RequestStatus.COMPLETED
-            self._pending_requests[request_id].url_response = url
-    
+        request = self.get_request(request_id)
+        if request and request.status == RequestStatus.PENDING:
+            request.status = RequestStatus.COMPLETED
+            request.url_response = url
+
     def cancel_request(self, request_id: str):
-        if request_id in self._pending_requests:
-            self._pending_requests[request_id].status = RequestStatus.CANCELLED
-    
+        request = self.get_request(request_id)
+        if request and request.status == RequestStatus.PENDING:
+            request.status = RequestStatus.CANCELLED
+
     def cleanup_request(self, request_id: str):
-        if request_id in self._pending_requests:
-            del self._pending_requests[request_id]
-    
+        self._pending_requests.pop(self._key(request_id), None)
+
     def is_session_active(self, session_id: str) -> bool:
-        return session_id in self._active_sessions
-    
+        return self._key(session_id) in self._active_sessions
+
     def mark_session_active(self, session_id: str):
-        self._active_sessions.add(session_id)
-    
+        self._active_sessions.add(self._key(session_id))
+
     def mark_session_inactive(self, session_id: str):
-        self._active_sessions.discard(session_id)
+        self._active_sessions.discard(self._key(session_id))
 
 async def send_ui_notification(request_id: str, prompt: str, ui_endpoint: Optional[str] = None, max_retries: int = 3) -> bool:
     """Send notification to UI via REST API with retry logic"""
@@ -127,7 +137,7 @@ async def wait_for_human_response(request_id: str, timeout: int = 300) -> Option
             return None
             
         if request.status == RequestStatus.COMPLETED:
-            logger.info(f"Request {request_id} completed with URL: {request.url_response}")
+            logger.info("Request %s completed", request_id)
             # Don't cleanup here - let the main function handle it to avoid race condition
             return request.url_response
             
@@ -174,7 +184,7 @@ async def human_creation(website_creation_prompt: str, tool_context: ToolContext
     manager = HumanInteractionManager()
     
     # Create a unique session ID based on the tool context or prompt hash
-    session_id = f"website_creation_{hash(website_creation_prompt) % 1000000}"
+    session_id = "website_creation_" + hashlib.sha256(website_creation_prompt.encode()).hexdigest()
     
     # Check if this session is already active to prevent duplicate requests
     if manager.is_session_active(session_id):
@@ -295,7 +305,7 @@ def submit_human_response(request_id: str, url: str) -> bool:
     
     if request and request.status == RequestStatus.PENDING:
         manager.update_request(request_id, url)
-        logger.info(f"Human response submitted for request {request_id}: {url}")
+        logger.info("Human response submitted for request %s", request_id)
         return True
     
     logger.warning(f"Invalid request ID or request not pending: {request_id}")

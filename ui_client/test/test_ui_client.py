@@ -22,16 +22,26 @@ from fastapi.testclient import TestClient
 from fastapi.websockets import WebSocket
 import httpx
 from google.oauth2.credentials import Credentials
-from common.security import Execution, ServiceAuth
+from common.security import Execution, ServiceAuth, execution
 from ui_client import db, security
+from ui_client.store import Store
+from ui_client.main import pipeline_snapshot
 from a2a.types import Task, TaskStatus, TaskState, SendMessageResponse, SendMessageSuccessResponse, JSONRPCError, JSONRPCErrorResponse
 
 from ui_client.main import app, app_state, manager, ConnectionManager, Business, BusinessStatus, AgentType, AgentUpdate
 
 
+def persist_fixture_state():
+    store = Store(db.DB_PATH)
+    revision = store.read_view("owner@example.test")["revision"]
+    store.save("owner@example.test", pipeline_snapshot(), expected_revision=revision)
+
+
 def signed_callback(client, payload):
     request = httpx.Request("POST", "http://localhost:8000/agent_callback", json=payload)
-    signed = next(ServiceAuth("sdr", "ui-client", Execution("owner@example.test", "demo")).auth_flow(request))
+    app_state["session_id"] = app_state["session_id"] or "fixture-campaign"
+    persist_fixture_state()
+    signed = next(ServiceAuth("sdr", "ui-client", Execution("owner@example.test", "demo", app_state["session_id"])).auth_flow(request))
     return client.post(request.url.path, content=request.content, headers=dict(signed.headers))
 
 class TestUIClient:
@@ -85,13 +95,14 @@ class TestUIClient:
     
     def test_start_lead_finding_valid_input(self, client, reset_app_state):
         """Test starting lead finding with valid city input."""
-        with patch("ui_client.main.run_lead_finding_process") as mock_process:
+        with patch("ui_client.main.WorkStore.claim", return_value=None):
             response = client.post("/start_lead_finding", data={"city": "New York"})
             assert response.status_code == 303  # Redirect
             assert app_state["current_city"] == "New York"
             assert app_state["is_running"] is True
             assert app_state["session_id"] is not None
-            mock_process.assert_called_once()
+            from common.execution_store import WorkStore
+            assert WorkStore().jobs("owner@example.test")[0]["kind"] == "discovery"
     
     def test_start_lead_finding_empty_city(self, client, reset_app_state):
         """Test starting lead finding with empty city input."""
@@ -102,6 +113,7 @@ class TestUIClient:
     def test_start_lead_finding_already_running(self, client, reset_app_state):
         """Test starting lead finding when already running."""
         app_state["is_running"] = True
+        persist_fixture_state()
         response = client.post("/start_lead_finding", data={"city": "Boston"})
         assert response.status_code == 400
         data = response.json()
@@ -158,6 +170,7 @@ class TestUIClient:
     
     def test_api_businesses_empty(self, client, reset_app_state):
         """Test businesses API endpoint with no businesses."""
+        persist_fixture_state()
         response = client.get("/api/businesses")
         assert response.status_code == 200
         data = response.json()
@@ -173,6 +186,7 @@ class TestUIClient:
         )
         app_state["businesses"][test_business.id] = test_business
         
+        persist_fixture_state()
         response = client.get("/api/businesses")
         assert response.status_code == 200
         data = response.json()
@@ -186,6 +200,7 @@ class TestUIClient:
         app_state["is_running"] = True
         app_state["session_id"] = "test-session-123"
         
+        persist_fixture_state()
         response = client.get("/api/status")
         assert response.status_code == 200
         data = response.json()
@@ -239,7 +254,7 @@ class TestWebSocketManager:
     
     def test_websocket_disconnect(self, connection_manager, mock_websocket):
         """Test WebSocket disconnection."""
-        connection_manager.active_connections.add(mock_websocket)
+        connection_manager.active_connections[mock_websocket] = "owner@example.test"
         connection_manager.disconnect(mock_websocket)
         
         assert mock_websocket not in connection_manager.active_connections
@@ -255,18 +270,18 @@ class TestWebSocketManager:
     @pytest.mark.asyncio
     async def test_send_update_with_connections(self, connection_manager, mock_websocket):
         """Test sending update to active connections."""
-        connection_manager.active_connections.add(mock_websocket)
+        connection_manager.active_connections[mock_websocket] = "owner@example.test"
         
         test_data = {"type": "test", "message": "hello"}
         await connection_manager.send_update(test_data)
         
-        mock_websocket.send_text.assert_called_once_with(json.dumps(test_data))
+        mock_websocket.send_text.assert_called_once_with(json.dumps({**test_data, "campaign_id": None}))
     
     @pytest.mark.asyncio
     async def test_send_update_connection_error(self, connection_manager, mock_websocket):
         """Test handling connection errors during update."""
         mock_websocket.send_text.side_effect = Exception("Connection error")
-        connection_manager.active_connections.add(mock_websocket)
+        connection_manager.active_connections[mock_websocket] = "owner@example.test"
         
         # Should handle the error gracefully and remove the connection
         await connection_manager.send_update({"type": "test"})
@@ -312,7 +327,13 @@ class TestBusinessModels:
 
 class TestA2AIntegration:
     """Test A2A integration functionality."""
-    
+
+    @pytest.fixture(autouse=True)
+    def execution_owner(self):
+        token = execution.set(Execution("owner@example.test", "demo"))
+        yield
+        execution.reset(token)
+
     @pytest.mark.asyncio
     @pytest.mark.parametrize("state,success", [(TaskState.completed, True), (TaskState.failed, False)])
     async def test_call_lead_finder_task_response(self, state, success):

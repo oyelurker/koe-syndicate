@@ -2,10 +2,8 @@
 BigQuery utility tools for Lead Manager.
 """
 import asyncio
-import json
 import logging
 from datetime import datetime
-from pathlib import Path
 from typing import Dict, Any
 
 from google.adk.tools import FunctionTool
@@ -14,32 +12,21 @@ from ..config import PROJECT, DATASET_ID, TABLE_ID, MEETING_TABLE_ID
 
 logger = logging.getLogger(__name__)
 
-# TODO(sergazy): Implement these
-def _write_json_file(filepath: Path, data: Dict[str, Any]) -> None:
-    """Helper function to write JSON data to file."""
-    output_data = {
-        "timestamp": datetime.now().isoformat(),
-        "data": data
-    }
-    
-    with open(filepath, 'w', encoding='utf-8') as f:
-        json.dump(output_data, f, indent=2, ensure_ascii=False)
-
 async def check_hot_lead(email_address: str) -> bool:
     """
     Check if an email address is in the hot leads database.
-    
+
     Args:
         email_address: Email address to check
-        
+
     Returns:
         bool indicating if the email is a hot lead or not, along with lead data if found.
     """
-    
+
     # Sleep for 2 sec
     try:
         logger.info(f"🔍 Checking if {email_address} is a hot lead...")
-        
+
         import os
         if os.environ.get("MOCK_LEAD_FINDER", "").lower() == "true":
             logger.info("Using MOCK mode for BigQuery hot lead check")
@@ -54,30 +41,30 @@ async def check_hot_lead(email_address: str) -> bool:
                 },
                 "message": f"{email_address} found in hot leads database (MOCK)"
             }
-            
+
         # Initialize BigQuery client
         client = bigquery.Client(project=PROJECT)
-        
+
         # Query to check if email exists in hot leads table
         query = f"""
-        SELECT 
+        SELECT
             *
         FROM `{PROJECT}.{DATASET_ID}.{TABLE_ID}`
         WHERE LOWER(email) = LOWER(@email_address)
         LIMIT 1
         """
-        
+
         # Configure query parameters
         job_config = bigquery.QueryJobConfig(
             query_parameters=[
                 bigquery.ScalarQueryParameter("email_address", "STRING", email_address),
             ]
         )
-        
+
         # Execute query
         query_job = client.query(query, job_config=job_config)
         results = list(query_job)
-        
+
         if not results:
             logger.info(f"❌ {email_address} is not a hot lead")
             return {
@@ -87,15 +74,15 @@ async def check_hot_lead(email_address: str) -> bool:
                 "lead_data": None,
                 "message": f"{email_address} is not found in hot leads database"
             }
-        
+
         # Convert BigQuery row to dictionary
         lead_data = dict(results[0])
-        
+
         # Convert any datetime objects to strings for JSON serialization
         for key, value in lead_data.items():
             if isinstance(value, datetime):
                 lead_data[key] = value.isoformat()
-        
+
         logger.info(f"✅ {email_address} is a hot lead!")
         return {
             "success": True,
@@ -104,7 +91,7 @@ async def check_hot_lead(email_address: str) -> bool:
             "lead_data": lead_data,
             "message": f"{email_address} found in hot leads database"
         }
-        
+
     except Exception as e:
         logger.error(f"❌ Error checking hot lead: {e}")
         return {
@@ -120,54 +107,18 @@ async def save_meeting_arrangement(
     calendar_request: Dict[str, Any],
     email_data: Dict[str, Any]
 ) -> Dict[str, Any]:
-    """
-    Save meeting arrangement data to BigQuery.
-    
-    Args:
-        lead_data: Hot lead information
-        meeting_data: Meeting details and results
-        email_data: Original email that triggered the meeting
-        
-    Returns:
-        Dictionary containing upload status
-    """
+    """Persist the confirmed receipt in the designated owner-scoped SQLite store."""
+    from common.integration_store import IntegrationStore
+    from common.execution_store import WorkStore
     try:
-        logger.info("💾 Saving meeting arrangement to BigQuery...")
-        
-        # Create output file for backup
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"lead_manager_meeting_{timestamp}.json"
-        filepath = Path(filename)
-        
-        # Write backup file
-        backup_data = {
-            "full_meeting_data": calendar_request,
-            "full_email_data": email_data
-        }
-        _write_json_file(filepath, backup_data)
-        
-        # Initialize BigQuery client
-        # client = bigquery.Client(project=PROJECT)
-        
-        # # Get table reference
-        # table_id = f"{PROJECT}.{DATASET_ID}.{MEETING_TABLE_ID}"
-        
-        
-        logger.info("✅ Meeting arrangement saved to BigQuery successfully")
-        return {
-            "success": True,
-            "backup_file": str(filepath),
-            "message": "Meeting arrangement saved successfully"
-        }
-        
-    except Exception as e:
-        logger.error(f"❌ Error saving meeting arrangement: {e}")
-        return {
-            "success": False,
-            "error": str(e),
-            "backup_file": str(filepath) if 'filepath' in locals() else None,
-            "message": f"Error saving meeting arrangement: {str(e)}."
-        }
+        WorkStore().require_job()
+        key = calendar_request.get('action_key')
+        if not key:
+            return {'success': False, 'persisted': False, 'error': 'Confirmed action_key is required'}
+        return await asyncio.to_thread(IntegrationStore().save_meeting, key)
+    except Exception:
+        return {'success': False, 'persisted': False, 'storage': 'local_sqlite',
+                'error': 'Meeting persistence failed; retry with the same confirmed action key'}
 
 # Create the tools
 check_hot_lead_tool = FunctionTool(func=check_hot_lead)

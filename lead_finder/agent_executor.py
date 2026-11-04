@@ -1,3 +1,4 @@
+from common.security import agent_session_identity
 import re
 from common.security import service_url
 import json
@@ -45,6 +46,11 @@ class LeadFinderAgentExecutor(AgentExecutor):
         logger.info("LeadFinderAgentExecutor initialized with ADK Runner.")
 
     async def execute(self, context: RequestContext, event_queue: EventQueue):
+        from common.execution_store import WorkStore, PolicyDenied
+        job = WorkStore().require_job()
+        if job["kind"] != "discovery":
+            raise PolicyDenied("Job kind does not authorize this agent")
+        owner_id_for_adk, scoped_session_id = agent_session_identity(context.context_id, context.task_id)
         task_updater = TaskUpdater(event_queue, context.task_id, context.context_id)
         
         logger.info("Received Lead Finder request")
@@ -115,7 +121,7 @@ class LeadFinderAgentExecutor(AgentExecutor):
         )
 
         # [Rest of the session handling code remains the same...]
-        session_id_for_adk = context.context_id
+        session_id_for_adk = scoped_session_id
         logger.info(f"Task {context.task_id}: Using ADK session_id: '{session_id_for_adk}' for city: '{city_name}'")
 
         session: Session | None = None
@@ -123,7 +129,7 @@ class LeadFinderAgentExecutor(AgentExecutor):
             try:
                 session = await self._adk_runner.session_service.get_session(
                     app_name=self._adk_runner.app_name,
-                    user_id="a2a_user",
+                    user_id=owner_id_for_adk,
                     session_id=session_id_for_adk,
                 )
             except Exception as e:
@@ -135,7 +141,7 @@ class LeadFinderAgentExecutor(AgentExecutor):
                 try:
                     session = await self._adk_runner.session_service.create_session(
                         app_name=self._adk_runner.app_name,
-                        user_id="a2a_user",
+                        user_id=owner_id_for_adk,
                         session_id=session_id_for_adk,
                         state={"city": city_name},  # Store city in session state
                     )

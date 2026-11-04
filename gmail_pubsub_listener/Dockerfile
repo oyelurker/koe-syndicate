@@ -21,4 +21,4 @@ ENV PYTHONPATH="${PYTHONPATH}:/app"
 EXPOSE 8083
 
 # Run the listener service
-CMD ["python", "gmail_pubsub_listener/gmail_listener_service.py"]
+CMD ["python", "-m", "gmail_pubsub_listener.gmail_listener_service"]

@@ -1,6 +1,5 @@
 """Shared isolated configuration for the offline suite; never use real providers."""
 import base64
-import copy
 import json
 import socket
 
@@ -15,6 +14,7 @@ def settings(monkeypatch, tmp_path):
               "KOE_OWNER_EMAIL": "owner@example.test", "KOE_MODE": "demo",
               "MOCK_SDR": "false", "MOCK_LEAD_FINDER": "false",
               "SECURITY_DB_PATH": str(tmp_path / "nonces.db"),
+              "OUTREACH_ATTACHMENT_DIR": str(tmp_path / "attachments"),
               "GOOGLE_OAUTH_CLIENT_ID": "test-client", "GOOGLE_OAUTH_CLIENT_SECRET": "test-secret",
               "GOOGLE_OAUTH_REDIRECT_URI": "http://localhost:8000/auth/google/callback",
               "NEXT_PUBLIC_FRONTEND_URL": "http://localhost:3000",
@@ -22,6 +22,8 @@ def settings(monkeypatch, tmp_path):
               "LEAD_FINDER_SERVICE_URL": "http://localhost:8081", "LEAD_MANAGER_SERVICE_URL": "http://localhost:8082",
               "GOOGLE_API_KEY": "offline-test-key", "GOOGLE_MAPS_API_KEY": "AIza" + "t" * 35,
               "ELEVENLABS_API_KEY": "offline-test-key",
+              "ELEVENLABS_AGENT_ID": "fixture-agent", "ELEVENLABS_PHONE_NUMBER_ID": "fixture-phone",
+              "SALES_EMAIL": "sender@example.test",
               "SERVICE_AUTH_KEYS": json.dumps({key: key + "k" * 48 for key in
                   ["ui-client", "sdr", "lead-manager", "lead-finder", "gmail-listener"]})}
     for name, value in values.items():
@@ -29,6 +31,7 @@ def settings(monkeypatch, tmp_path):
     for name in ["CALLS", "EMAIL", "CALENDAR"]:
         monkeypatch.setenv("ENABLE_LIVE_" + name, "false")
     monkeypatch.setattr(db, "DB_PATH", tmp_path / "tokens.db")
+    monkeypatch.setenv("DB_PATH", str(db.DB_PATH))
 
 
 @pytest.fixture(autouse=True)
@@ -44,14 +47,14 @@ def offline_network(monkeypatch):
 @pytest.fixture(autouse=True)
 def reset_app_state(settings, monkeypatch):
     from ui_client import main
-    baseline = {"is_running": False, "current_city": None, "businesses": {},
-                "agent_updates": [], "websocket_connections": set(), "session_id": None,
-                "human_input_requests": {}, "lead_scores": {}}
+    from common.security import Execution, execution
+    token = execution.set(Execution("owner@example.test", "demo"))
     monkeypatch.setattr(main, "RAPIDS_SCORING_AVAILABLE", False)
-    main.app_state.clear()
-    main.app_state.update(copy.deepcopy(baseline))
+    main.app_state.clear_all()
     main.manager.active_connections.clear()
-    yield
-    main.app_state.clear()
-    main.app_state.update(copy.deepcopy(baseline))
-    main.manager.active_connections.clear()
+    try:
+        yield
+    finally:
+        main.app_state.clear_all()
+        main.manager.active_connections.clear()
+        execution.reset(token)

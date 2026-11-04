@@ -159,9 +159,9 @@ def test_production_config_rejects_defaults(monkeypatch):
         security.validate_config()
 
 
-def signed_request(path="/agent_callback", body=None, caller="sdr", audience="ui-client"):
+def signed_request(path="/agent_callback", body=None, caller="sdr", audience="ui-client", campaign=None):
     request = httpx.Request("POST", "http://localhost:8000" + path, json=body or {})
-    return next(ServiceAuth(caller, audience, Execution("owner@example.test", "demo")).auth_flow(request))
+    return next(ServiceAuth(caller, audience, Execution("owner@example.test", "demo", campaign)).auth_flow(request))
 
 
 def test_service_signature_body_audience_expiry_and_replay(monkeypatch):
@@ -181,7 +181,10 @@ def test_service_signature_body_audience_expiry_and_replay(monkeypatch):
 def test_signed_callback_works_once_and_cannot_spoof_agent(client):
     payload = {"agent_type": "sdr", "business_id": "test-lead", "status": "found", "message": "fixture",
                "data": {"name": "Fixture", "city": "Test"}}
-    req = signed_request(body=payload)
+    import ui_client.main as main
+    main.app_state["session_id"] = "fixture-campaign"
+    main.pipeline_store.save("owner@example.test", main.pipeline_snapshot())
+    req = signed_request(body=payload, campaign="fixture-campaign")
     assert client.post("/agent_callback", content=req.content, headers=dict(req.headers)).status_code == 200
     assert client.post("/agent_callback", content=req.content, headers=dict(req.headers)).status_code == 401
     req = signed_request(body={**payload, "agent_type": "calendar"})

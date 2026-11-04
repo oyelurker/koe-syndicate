@@ -26,6 +26,7 @@ COPY __init__.py .
 # Copy the necessary source code directories directly into the WORKDIR
 COPY common/ ./common/
 COPY ui_client/ ./ui_client/
+COPY lead_scoring_ml.py demo_leads.json ./
 
 # Command to run the ui_client UI (FastAPI) using uvicorn
 # Use sh -c to ensure $PORT is expanded by the shell, fallback to 8000 if $PORT not set
