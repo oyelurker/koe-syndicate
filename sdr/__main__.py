@@ -131,6 +131,13 @@ try:
     )
 
     async def human_input_callback(request: Request):
+        from common.security import execution,SecurityError
+        from common.execution_store import WorkStore
+        if execution.get() and execution.get().job_id:
+            try:
+                WorkStore().require_job()
+            except SecurityError:
+                return JSONResponse({'error':'Approval job is cancelled or expired'},409)
         request_id = request.path_params.get('request_id')
         try:
             data = await request.json()
@@ -147,6 +154,53 @@ try:
     app.routes.append(
         Route(path='/api/human-input/{request_id}', methods=['POST'], endpoint=human_input_callback)
     )
+
+    async def execute_approved_action(request: Request):
+        from common.execution_store import WorkStore
+        from common.security import SecurityError
+        import json
+        import asyncio
+        ledger=WorkStore()
+        try:
+            job=ledger.require_job()
+            key=request.path_params['key']
+            if job['kind']!='action' or json.loads(job['payload']).get('action_key')!=key:
+                raise SecurityError('Action does not match its durable job')
+            proposal=ledger.proposal(key)
+            payload=json.loads(proposal['payload'])
+            if proposal['kind']=='calls':
+                from .sdr.tools.phone_call import _make_call
+                result=await _make_call(payload['number'],payload['system_prompt'],payload['first_message'])
+            elif proposal['kind']=='email':
+                from .sdr.sub_agents.outreach_email_agent.tools.gmail_service_account_tool import send_email
+                _,data=ledger.artifact(payload['attachment_sha256']) if payload.get('attachment_sha256') else (None,None)
+                name=payload.get('attachment_name')
+                result=await asyncio.to_thread(send_email,payload['to'],payload['subject'],payload['body'],_attachment=data,_attachment_name=name)
+            else:
+                raise SecurityError('Unsupported SDR action')
+            return JSONResponse(result)
+        except SecurityError as exc:
+            return JSONResponse({'status':'blocked','error':str(exc)},403)
+
+    async def reconcile_provider_action(request: Request):
+        from common.execution_store import WorkStore
+        import asyncio
+        ledger=WorkStore()
+        row=ledger.action(request.path_params['key'])
+        if not row:
+            return JSONResponse({'error':'Action not found'},404)
+        if row['kind']=='calls':
+            from .sdr.tools.phone_call import reconcile_call
+            result=await reconcile_call(row['id'])
+        elif row['kind']=='email':
+            from .sdr.sub_agents.outreach_email_agent.tools.gmail_service_account_tool import reconcile_email
+            result=await asyncio.to_thread(reconcile_email,row['id'])
+        else:
+            return JSONResponse({'error':'Unsupported action'},400)
+        return JSONResponse(result)
+
+    app.routes.append(Route(path='/internal/actions/{key}/execute',methods=['POST'],endpoint=execute_approved_action))
+    app.routes.append(Route(path='/internal/actions/{key}/reconcile',methods=['POST'],endpoint=reconcile_provider_action))
 
     async def test_ui_callback(request: Request):
         """Test endpoint to trigger send_sdr_update_to_ui functionality"""

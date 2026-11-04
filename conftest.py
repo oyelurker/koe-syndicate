@@ -14,6 +14,7 @@ def settings(monkeypatch, tmp_path):
               "KOE_OWNER_EMAIL": "owner@example.test", "KOE_MODE": "demo",
               "MOCK_SDR": "false", "MOCK_LEAD_FINDER": "false",
               "SECURITY_DB_PATH": str(tmp_path / "nonces.db"),
+              "OUTREACH_ATTACHMENT_DIR": str(tmp_path / "attachments"),
               "GOOGLE_OAUTH_CLIENT_ID": "test-client", "GOOGLE_OAUTH_CLIENT_SECRET": "test-secret",
               "GOOGLE_OAUTH_REDIRECT_URI": "http://localhost:8000/auth/google/callback",
               "NEXT_PUBLIC_FRONTEND_URL": "http://localhost:3000",
@@ -21,6 +22,8 @@ def settings(monkeypatch, tmp_path):
               "LEAD_FINDER_SERVICE_URL": "http://localhost:8081", "LEAD_MANAGER_SERVICE_URL": "http://localhost:8082",
               "GOOGLE_API_KEY": "offline-test-key", "GOOGLE_MAPS_API_KEY": "AIza" + "t" * 35,
               "ELEVENLABS_API_KEY": "offline-test-key",
+              "ELEVENLABS_AGENT_ID": "fixture-agent", "ELEVENLABS_PHONE_NUMBER_ID": "fixture-phone",
+              "SALES_EMAIL": "sender@example.test",
               "SERVICE_AUTH_KEYS": json.dumps({key: key + "k" * 48 for key in
                   ["ui-client", "sdr", "lead-manager", "lead-finder", "gmail-listener"]})}
     for name, value in values.items():
@@ -28,6 +31,7 @@ def settings(monkeypatch, tmp_path):
     for name in ["CALLS", "EMAIL", "CALENDAR"]:
         monkeypatch.setenv("ENABLE_LIVE_" + name, "false")
     monkeypatch.setattr(db, "DB_PATH", tmp_path / "tokens.db")
+    monkeypatch.setenv("DB_PATH", str(db.DB_PATH))
 
 
 @pytest.fixture(autouse=True)

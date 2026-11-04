@@ -14,6 +14,7 @@ from a2a.types import DataPart, Part, TaskState
 # Make sure you have a shared config for the artifact name
 from common.config import DEFAULT_SDR_ARTIFACT_NAME, DEFAULT_UI_CLIENT_URL
 from google.adk import Runner
+from google.adk.agents.run_config import RunConfig
 from google.adk.sessions import InMemorySessionService, Session
 from google.adk.artifacts import InMemoryArtifactService
 from google.genai import types as genai_types
@@ -47,6 +48,11 @@ class SDRAgentExecutor(AgentExecutor):
         logger.info("SDRAgentExecutor initialized with ADK Runner and artifact service.")
 
     async def execute(self, context: RequestContext, event_queue: EventQueue):
+        from common.execution_store import WorkStore, PolicyDenied
+        job = WorkStore().require_job()
+        if job["kind"] != "sdr":
+            raise PolicyDenied("Job kind does not authorize this agent")
+        WorkStore().workflow_preflight()
         owner_id_for_adk, scoped_session_id = agent_session_identity(context.context_id, context.task_id)
         task_updater = TaskUpdater(event_queue, context.task_id, context.context_id)
         
@@ -241,6 +247,7 @@ class SDRAgentExecutor(AgentExecutor):
                 user_id=owner_id_for_adk,
                 session_id=session_id_for_adk,
                 new_message=adk_content,
+                run_config=RunConfig(max_llm_calls=8),
             ):
                 log_entry = f" ** - - - - - ** \n [Event] Author: {event.author}, \n Type: {type(event).__name__}, \n Final: {event.is_final_response()}, \n Content: {event.content}"
                 log_to_file(log_entry)

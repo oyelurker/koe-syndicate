@@ -1,6 +1,6 @@
 # P1 verification checkpoint — 4 November 2026
 
-Items 11–15 are complete for the restricted local/shared-database scope. See `P1-CONCURRENCY.md` for item 15, its multi-process evidence and its deployment limits. The durable-storage foundation was merged through PR #20; see `P1-STORAGE.md`. Hosted CI and main's merge protection are verified, including the deliberate failure and recovery proof recorded below. Durable job execution, outreach policies, integrations and cloud deployment remain pending in items 16–22. Cloud services stay IAM-contained and live actions stay disabled.
+Items 11–18 are complete for the restricted local/shared-database scope. See `P1-CONCURRENCY.md` for item 15, its multi-process evidence and its deployment limits. The durable-storage foundation was merged through PR #20; see `P1-STORAGE.md`. Hosted CI and main's merge protection are verified, including the deliberate failure and recovery proof recorded below. Phase C execution safeguards are documented in `P1-PHASE-C.md`. Integrations and cloud deployment remain pending in items 19–22. Cloud services stay IAM-contained and live actions stay disabled.
 
 ## Backend baseline — item 11 complete
 
@@ -44,3 +44,7 @@ Item 13 is complete. `p1-hosted-ci.json` contains the run/job evidence and polic
 The owner retains control of commits. This branch changes only verification documentation and evidence; the two earlier commit-file manifests are historical and should not be reused. The next implementation is item 16: durable dispatch, cancellation, bounded retries, idempotency and reconciliation. Keep the existing single-owner restriction and disabled live actions until all applicable execution and deployment gates are satisfied.
 
 The configuration follows the official [GitHub Actions Python guide](https://docs.github.com/en/actions/tutorials/build-and-test-code/python) and [Dependabot options reference](https://docs.github.com/en/code-security/reference/supply-chain-security/dependabot-options-reference). Frontend changes follow the installed Next.js 16.4.3 documentation for client components, Link, Image and fonts.
+
+## Phase C final checkpoint — 4 November 2026
+
+Items 16–18 pass the complete offline suite: **172 passed**, with four existing upstream SDK deprecation warnings, in 84.21 seconds. This includes local process restart/claim recovery, independent-process quota races, signed exact-action dispatch, migration rollback, cancellation, provider timeout/reconciliation and policy enforcement. Frontend lint (zero warnings), TypeScript and production build pass. Whitespace validation and the tracked-file secret check pass (zero matches). Providers were mocked; no live writes or cloud deployment were performed. See `P1-PHASE-C.md` and the explicit 29-file commit manifest `P1-PHASE-C-COMMIT-FILES.txt`. Hosted CI awaits publication.

@@ -46,6 +46,10 @@ class LeadFinderAgentExecutor(AgentExecutor):
         logger.info("LeadFinderAgentExecutor initialized with ADK Runner.")
 
     async def execute(self, context: RequestContext, event_queue: EventQueue):
+        from common.execution_store import WorkStore, PolicyDenied
+        job = WorkStore().require_job()
+        if job["kind"] != "discovery":
+            raise PolicyDenied("Job kind does not authorize this agent")
         owner_id_for_adk, scoped_session_id = agent_session_identity(context.context_id, context.task_id)
         task_updater = TaskUpdater(event_queue, context.task_id, context.context_id)
         

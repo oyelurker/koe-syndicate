@@ -41,3 +41,7 @@ Regression evidence covers revision rollback, competing OS processes with the sa
 A real two-process Uvicorn test verifies authenticated reads, wrong-owner read/reset/execution/socket denial, a callback on worker 2 reaching a socket on worker 1, a reset becoming visible on worker 1, stale callback rejection and preservation of the other owner's records. Approval tests cover owner/campaign ID collisions, missing context, signed SDR rejection/duplicate responses, stale browser responses and truthful failed delivery. All test databases, credentials and ports are temporary; providers remain disabled.
 
 Validation result: **132 tests passed** in the combined offline suite, with four existing upstream SDK warnings. The final expired-worker lease-renewal/write-fencing regression also passes. Whitespace validation and tracked-file secret scanning pass. Hosted Linux/Windows PR checks remain pending publication; no live provider or cloud deployment claim is made.
+
+## Phase C follow-up — 4 November 2026
+
+Item 16 is now complete for the same local shared-database topology. Durable claims and signed job tokens fence execution and callbacks; provider receipts recover confirmed outcomes and quarantine ambiguous writes. Items 17–18 add policy enforcement and bounded asynchronous phone execution. See `P1-PHASE-C.md` for upgrade requirements and verification limits.

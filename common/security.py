@@ -13,7 +13,7 @@ import secrets
 import sqlite3
 import time
 from contextvars import ContextVar
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -30,6 +30,8 @@ class Execution:
     owner: str
     mode: str
     campaign_id: str | None = None
+    job_id: str | None = None
+    job_token: str | None = None
 
 
 execution: ContextVar[Execution | None] = ContextVar("koe_execution", default=None)
@@ -53,7 +55,7 @@ def campaign_context(campaign_id):
         raise SecurityError("Missing or invalid campaign identity")
     if context.campaign_id and context.campaign_id != campaign_id:
         raise SecurityError("Campaign identity mismatch")
-    return Execution(context.owner, context.mode, campaign_id)
+    return replace(context, campaign_id=campaign_id)
 
 
 def agent_session_identity(campaign_id, task_id):
@@ -125,8 +127,8 @@ def service_url(audience):
     return os.getenv(key, defaults[audience]).rstrip("/")
 
 
-def canonical(caller, audience, owner, run_mode, timestamp, nonce, method, target, body, campaign_id=""):
-    return "\n".join((caller, audience, owner, run_mode, campaign_id, timestamp, nonce, method.upper(), target,
+def canonical(caller, audience, owner, run_mode, timestamp, nonce, method, target, body, campaign_id="", job_id="", job_token=""):
+    return "\n".join((caller, audience, owner, run_mode, campaign_id, job_id, job_token, timestamp, nonce, method.upper(), target,
                       hashlib.sha256(body).hexdigest())).encode()
 
 
@@ -154,8 +156,9 @@ class ServiceAuth(httpx.Auth):
         target = request.url.raw_path.decode("ascii")
         signature = hmac.new(service_key(self.caller).encode(), canonical(
             self.caller, self.audience, context.owner, run_mode, timestamp, nonce,
-            request.method, target, request.content, context.campaign_id or ""), hashlib.sha256).hexdigest()
+            request.method, target, request.content, context.campaign_id or "", context.job_id or "", context.job_token or ""), hashlib.sha256).hexdigest()
         request.headers.update({"X-Koe-Caller": self.caller, "X-Koe-Audience": self.audience,
+            "X-Koe-Job": context.job_id or "", "X-Koe-Job-Token": context.job_token or "",
             "X-Koe-Campaign": context.campaign_id or "", "X-Koe-Owner": context.owner, "X-Koe-Mode": run_mode, "X-Koe-Time": timestamp,
             "X-Koe-Nonce": nonce, "X-Koe-Signature": signature})
         yield request
@@ -164,6 +167,9 @@ class ServiceAuth(httpx.Auth):
 def verify_request(headers, method, target, body, audience, allowed_callers):
     caller = headers.get("x-koe-caller", "")
     owner = headers.get("x-koe-owner", "")
+    job_id, job_token = headers.get("x-koe-job", ""), headers.get("x-koe-job-token", "")
+    if bool(job_id) != bool(job_token) or (job_id and (not re.fullmatch(r"[A-Za-z0-9:_-]{1,128}",job_id) or not re.fullmatch(r"[a-f0-9]{48}", job_token))):
+        raise SecurityError("Invalid job identity")
     campaign_id = headers.get("x-koe-campaign", "")
     if campaign_id and not re.fullmatch(r"[A-Za-z0-9._:-]{1,128}", campaign_id):
         raise SecurityError("Invalid campaign identity")
@@ -182,11 +188,11 @@ def verify_request(headers, method, target, body, audience, allowed_callers):
     if abs(time.time() - issued) > 60:
         raise SecurityError("Expired request")
     expected = hmac.new(service_key(caller).encode(), canonical(caller, audience, owner,
-        run_mode, timestamp, nonce, method, target, body, campaign_id), hashlib.sha256).hexdigest()
+        run_mode, timestamp, nonce, method, target, body, campaign_id, job_id, job_token), hashlib.sha256).hexdigest()
     if not hmac.compare_digest(expected, headers.get("x-koe-signature", "")):
         raise SecurityError("Invalid signature")
     consume_once(audience + ":" + caller, nonce, issued + 120)
-    return Execution(owner, "demo" if mode() == "demo" else run_mode, campaign_id or None)
+    return Execution(owner, "demo" if mode() == "demo" else run_mode, campaign_id or None, job_id or None, job_token or None)
 
 
 class ServiceMiddleware:

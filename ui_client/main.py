@@ -151,6 +151,7 @@ class LeadFinderRequest(BaseModel):
     niche: Optional[str] = Field(None, description="Target business niche or type")
 
 class HumanInputRequest(BaseModel):
+    job_id: str | None = None
     campaign_id: str | None = None
     request_id: str
     prompt: str
@@ -186,6 +187,7 @@ from .security import BrowserSecurityMiddleware, validate_config
 from .store import Store, StoreConflict
 from . import db as token_db
 from common.security import Execution, execution, owner_email
+from common.execution_store import WorkStore, PolicyDenied
 
 pipeline_store: Store | None = None
 runtime_worker_id: str | None = None
@@ -222,6 +224,8 @@ def require_current_campaign():
     context = execution.get()
     if not context or not campaign_is_current(context.campaign_id):
         raise SecurityError("Campaign is missing, reset or superseded")
+    if context.job_id:
+        WorkStore().require_job()
 
 
 @asynccontextmanager
@@ -244,7 +248,7 @@ async def pipeline_scope():
         app_state.unbind(token)
 
 
-async def persist_pipeline(event):
+async def persist_pipeline(event, dispatch=None):
     context = execution.get()
     if context is None:
         raise SecurityError("Missing owner for persistent pipeline update")
@@ -258,7 +262,7 @@ async def persist_pipeline(event):
     snapshot = pipeline_snapshot()
     try:
         result = await asyncio.to_thread(pipeline_store.save, context.owner, snapshot,
-            json.loads(json.dumps(event, default=str)), expected_revision=view.revision, worker_id=runtime_worker_id)
+            json.loads(json.dumps(event, default=str)), expected_revision=view.revision, worker_id=runtime_worker_id, dispatch=dispatch)
     except StoreConflict:
         # Discard this operation's speculative state and stop its later callbacks/finalizers.
         view.conflicted = True
@@ -292,18 +296,21 @@ class ConnectionManager:
         self.active_connections.pop(websocket, None)
         logger.info(f"WebSocket disconnected. Total connections: {len(self.active_connections)}")
     
-    async def send_update(self, data: dict[str, Any]):
+    async def send_update(self, data: dict[str, Any], dispatch=None):
         """Persist and publish only within the verified owner's current view."""
         owner = runtime_owner()
         if self.durable_delivery and app_state.current_view() is None:
             async with pipeline_scope():
-                return await self.send_update(data)
+                return await self.send_update(data, dispatch=dispatch)
         context = execution.get()
         campaign = context.campaign_id or app_state["session_id"]
         if context.campaign_id:
             require_current_campaign()
         if self.persist is not None:
-            await self.persist(data)
+            if dispatch is None:
+                await self.persist(data)
+            else:
+                await self.persist(data, dispatch=dispatch)
         if self.durable_delivery:
             return
         envelope = {**data, "campaign_id": campaign}
@@ -389,9 +396,13 @@ async def lifespan(app: FastAPI):
             except Exception:
                 logger.error("Worker lease renewal failed; expired leases deny further writes")
     heartbeat_task = asyncio.create_task(renew_worker())
+    dispatcher_task = asyncio.create_task(dispatch_loop())
     try:
         yield
     finally:
+        dispatcher_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await dispatcher_task
         heartbeat_task.cancel()
         with suppress(asyncio.CancelledError):
             await heartbeat_task
@@ -505,6 +516,8 @@ from .auth_routes import router as auth_router
 from .calendar_routes import router as calendar_router
 app.include_router(auth_router)
 app.include_router(calendar_router)
+from .execution_routes import router as execution_router
+app.include_router(execution_router)
 
 async def call_lead_finder_agent_a2a(city: str, session_id: str, **kwargs) -> dict[str, Any]:
     """
@@ -733,7 +746,7 @@ async def call_lead_finder_agent(city: str, session_id: str, **kwargs) -> dict[s
             "success": True,
             "businesses": [
                 {
-                    "id": str(uuid.uuid4()),
+                    "id": str(uuid.uuid5(uuid.NAMESPACE_URL, "koe-demo:"+city+":alpha")),
                     "name": f"Demo Lead Alpha - {city}",
                     "phone": "+1-555-0101",
                     "email": "contact@demoleadalpha.com",
@@ -743,7 +756,7 @@ async def call_lead_finder_agent(city: str, session_id: str, **kwargs) -> dict[s
                     "notes": ["Generated via Mock Mode"]
                 },
                 {
-                    "id": str(uuid.uuid4()),
+                    "id": str(uuid.uuid5(uuid.NAMESPACE_URL, "koe-demo:"+city+":beta")),
                     "name": f"Demo Lead Beta - {city}",
                     "phone": "+1-555-0102",
                     "email": "hello@demoleadbeta.com",
@@ -1073,15 +1086,118 @@ async def call_lead_manager_agent(query: str, session_id: str) -> dict[str, Any]
     else:
         return await call_lead_manager_agent_simple(query, session_id)
 
+def service_url_for_sdr():
+    from common.security import service_url
+    return service_url("sdr")
+
+
+async def run_durable_job(job):
+    context = Execution(owner_email(), job["mode"], job["campaign"], job["id"], job["claim_token"])
+    store = WorkStore()
+    token = execution.set(context)
+    current = asyncio.current_task()
+    async def renew_claim():
+        while True:
+            await asyncio.sleep(10)
+            try:
+                await asyncio.to_thread(store.renew, context)
+            except Exception:
+                current.cancel()
+                return
+    renewal = asyncio.create_task(renew_claim())
+    try:
+        if job["kind"] == "action":
+            proposal = await asyncio.to_thread(store.proposal,job["payload"]["action_key"])
+            if not proposal:
+                raise PolicyDenied("Approved action not found")
+            payload = json.loads(proposal["payload"])
+            if proposal["kind"] in {"calls","email"}:
+                async with httpx.AsyncClient(auth=ServiceAuth("ui-client","sdr"),timeout=660) as client:
+                    response=await client.post(service_url_for_sdr()+"/internal/actions/"+job["payload"]["action_key"]+"/execute",json={})
+                    response.raise_for_status()
+                    output=response.json()
+            else:
+                from .calendar_routes import meeting,Meeting
+                output = await meeting(Meeting.model_validate(payload))
+                if isinstance(output,JSONResponse):
+                    output = json.loads(output.body)
+            result = {"success":output.get("success") is True or output.get("status") in {"success","done"},"provider_result":output}
+            if result["success"]:
+                async with pipeline_scope():
+                    require_current_campaign()
+                    from common.execution_store import normalize_phone,normalize_email
+                    matched=[]
+                    for business in app_state["businesses"].values():
+                        with suppress(SecurityError):
+                            recipient=normalize_phone(business.phone) if proposal["kind"]=="calls" else normalize_email(business.email)
+                            if recipient in json.loads(proposal["recipients"]):
+                                matched.append(business.id)
+                    if len(matched)==1 or proposal["kind"]=="calendar":
+                        await agent_callback(AgentUpdate(agent_type=AgentType.CALENDAR if proposal["kind"]=="calendar" else AgentType.SDR,
+                            business_id=matched[0] if len(matched)==1 else "unknown_business",
+                            status=BusinessStatus.MEETING_SCHEDULED if proposal["kind"]=="calendar" else BusinessStatus.CONTACTED,
+                            message="Provider confirmed the approved action",data={**output,"action_key":job["payload"]["action_key"]}))
+
+        elif job["kind"] == "discovery":
+            result = await run_lead_finding_process(job["payload"]["city"],job["campaign"],job["payload"].get("niche", ""))
+        else:
+            async with pipeline_scope():
+                require_current_campaign()
+                if job["kind"] == "sdr":
+                    result = await call_sdr_agent(job["payload"]["business"],job["campaign"])
+                else:
+                    result = await call_lead_manager_agent(job["payload"]["query"],job["campaign"])
+                require_current_campaign()
+                await manager.send_update({"type":"job_result","job_id":job["id"],"success":bool(result.get("success"))})
+        await asyncio.to_thread(store.finish_job,context,result,
+            None if result and result.get("success") else "Workflow did not confirm success")
+    except asyncio.CancelledError:
+        with suppress(Exception):
+            await asyncio.to_thread(store.finish_job,context,None,"Consumer stopped; outcome unresolved")
+        raise
+    except Exception:
+        with suppress(Exception):
+            await asyncio.to_thread(store.finish_job,context,None,"Workflow failed or provider outcome is uncertain")
+        logger.warning("Durable job did not complete; see owner job ledger")
+    finally:
+        renewal.cancel()
+        with suppress(asyncio.CancelledError):
+            await renewal
+        execution.reset(token)
+
+
+async def dispatch_loop():
+    while True:
+        await asyncio.sleep(0.25)
+        try:
+            job = await asyncio.to_thread(WorkStore().claim,owner_email(),runtime_worker_id,mode())
+            if job:
+                # A cancelled claim must not stop the lifespan consumer.
+                task = asyncio.create_task(run_durable_job(job))
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    if asyncio.current_task().cancelling():
+                        task.cancel()
+                        with suppress(asyncio.CancelledError):
+                            await task
+                        raise
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.error("Durable dispatcher unavailable; no provider work dispatched")
+            await asyncio.sleep(1)
+
+
 async def run_lead_finding_process(city: str, session_id: str, niche: str = ""):
     token = execution.set(campaign_context(session_id))
     try:
         if pipeline_store is not None:
             async with pipeline_scope():
                 if campaign_is_current(session_id):
-                    await _run_lead_finding_process(city, session_id, niche)
+                    return await _run_lead_finding_process(city, session_id, niche)
         elif campaign_is_current(session_id):
-            await _run_lead_finding_process(city, session_id, niche)
+            return await _run_lead_finding_process(city, session_id, niche)
     except StoreConflict:
         logger.info("Discarded obsolete discovery result after a competing commit")
     finally:
@@ -1091,6 +1207,7 @@ async def run_lead_finding_process(city: str, session_id: str, niche: str = ""):
 async def _run_lead_finding_process(city: str, session_id: str, niche: str = ""):
     """Run the complete lead finding process."""
     business_logger = logging.getLogger(BUSINESS_LOGIC_LOGGER)
+    outcome = {"success": False, "error": "Discovery did not complete"}
     
     try:
         business_logger.info(f"Starting lead finding process for {city}")
@@ -1099,6 +1216,7 @@ async def _run_lead_finding_process(city: str, session_id: str, niche: str = "")
         result = await call_lead_finder_agent(city, session_id, niche=niche)
         if not campaign_is_current(session_id):
             return
+        outcome = result
         
         if result["success"]:
             found_businesses = result.get("businesses", [])
@@ -1109,7 +1227,9 @@ async def _run_lead_finding_process(city: str, session_id: str, niche: str = "")
                 if not campaign_is_current(session_id):
                     return
                 try:
-                    biz_id = b_data.get("id", str(uuid.uuid4()))
+                    import hashlib
+                    stable_id = hashlib.sha256(json.dumps([city,b_data.get("name"),b_data.get("phone")],sort_keys=True).encode()).hexdigest()
+                    biz_id = b_data.get("id") or stable_id
                     new_biz = Business(
                         id=biz_id,
                         name=b_data.get("name") or "Unknown Business",
@@ -1186,6 +1306,7 @@ async def _run_lead_finding_process(city: str, session_id: str, niche: str = "")
                 "type": "process_finished",
                 "timestamp": datetime.now().isoformat(),
             })
+    return outcome
 
 def socket_snapshot(snapshot, revision):
     snapshot = snapshot or empty_pipeline_state()
@@ -1251,6 +1372,13 @@ async def agent_callback(update: AgentUpdate):
         require_current_campaign()
     except SecurityError:
         return JSONResponse({"error": "Campaign is missing, reset or superseded"}, status_code=409)
+
+    if update.status in {BusinessStatus.CONTACTED,BusinessStatus.MEETING_SCHEDULED}:
+        receipt = update.data or {}
+        kind = "calendar" if update.status == BusinessStatus.MEETING_SCHEDULED else ("calls" if receipt.get("conversation_id") else "email")
+        provider_id = receipt.get("meeting_id") or receipt.get("conversation_id") or receipt.get("message_id")
+        if not WorkStore().confirmed(receipt.get("action_key"),kind,provider_id):
+            return JSONResponse({"error":"No confirmed durable provider receipt"},409)
 
     logger.info(f"Received agent callback: {update.agent_type} for business {update.business_id}")
 
@@ -1323,6 +1451,12 @@ async def agent_callback(update: AgentUpdate):
 
     # Get the final business object to send in the update
     final_business_obj = app_state["businesses"].get(update.business_id)
+    if final_business_obj and update.status == BusinessStatus.NOT_INTERESTED:
+        for recipient in (final_business_obj.email, final_business_obj.phone):
+            if recipient:
+                with suppress(SecurityError):
+                    await asyncio.to_thread(WorkStore().suppress,recipient,"Recipient opted out")
+
     # Handle calendar events: first send a business_updated to move/create the card,
     # then send a calendar_notification with meeting details
     if update.agent_type == AgentType.CALENDAR and final_business_obj:
@@ -1407,10 +1541,7 @@ async def start_lead_finding(city: str = Form(...), niche: str = Form(None)):
             "type": "process_started",
             "city": request_data.city,
             "timestamp": datetime.now().isoformat(),
-        })
-        
-        # Call Lead Finder agent asynchronously
-        asyncio.create_task(run_lead_finding_process(request_data.city, session_id, request_data.niche))
+        }, dispatch={"kind":"discovery","payload":{"city":request_data.city,"niche":request_data.niche or ""},"mode":mode()})
         
         return RedirectResponse("/", status_code=303)
         
@@ -1469,7 +1600,7 @@ async def send_business_to_sdr(
         business = app_state["businesses"][business_id]
         
         # Convert business to dict for sending to SDR
-        business_data = business.model_dump()
+        business_data = business.model_dump(mode="json")
         
         # Override phone number if user provided one
         if user_phone:
@@ -1477,6 +1608,12 @@ async def send_business_to_sdr(
             business_data["phone"] = user_phone
             logger.info(f"Overriding phone number to: {user_phone} for business {business.name}")
         
+        from common.execution_store import normalize_phone
+        try:
+            business_data["phone"] = normalize_phone(business_data.get("phone") or business_data.get("phone_number"))
+            business_data["phone_number"] = business_data["phone"]
+        except SecurityError as exc:
+            return JSONResponse({"error":str(exc),"error_category":"validation"},422)
         # Get current session ID
         session_id = app_state["session_id"]
         if not session_id:
@@ -1484,31 +1621,10 @@ async def send_business_to_sdr(
         
         logger.info(f"Sending business {business.name} to SDR agent")
         
-        # Call SDR agent
-        result = await call_sdr_agent(business_data, session_id)
-        if not campaign_is_current(session_id):
-            return JSONResponse({"error": "Campaign was reset or superseded"}, status_code=409)
-        
-        if result["success"]:
-            # Send success update via WebSocket
-            await manager.send_update({
-                "type": "sdr_engaged",
-                "business_id": business_id,
-                "business_name": business.name,
-                "message": result["message"],
-                "timestamp": datetime.now().isoformat(),
-            })
-            
-            return JSONResponse(
-                status_code=200,
-                content={"success": True, "message": result["message"]}
-            )
-        else:
-            return JSONResponse(
-                status_code=500,
-                content={"error": result["error"]}
-            )
-            
+        queued = await persist_pipeline({"type":"job_queued","agent":"sdr"},
+            dispatch={"kind":"sdr","payload":{"business":business_data},"mode":mode()})
+        return JSONResponse({"success":True,"job_id":queued["job_id"],"message":"Outreach queued; no provider action is confirmed"},202)
+
     except StoreConflict:
         raise
     except Exception as e:
@@ -1538,128 +1654,13 @@ async def reset_state():
 
 @app.post("/trigger_lead_manager")
 async def trigger_lead_manager():
-    """Trigger the Lead Manager agent manually."""
     if mode() != "live":
-        return JSONResponse({"error": "Live workflow disabled in demo mode"}, status_code=403)
-    logger.info("Manual trigger for Lead Manager agent requested")
-    
-    try:
-        # Get or create session ID
-        session_id = app_state.get("session_id")
-        if not session_id:
-            session_id = str(uuid.uuid4())
-            app_state["session_id"] = session_id
-        
-        # Check for Mock Mode
-        if os.environ.get("MOCK_SDR", "").lower() == "true":
-            # Send initial update
-            await manager.send_update({
-                "type": "agent_status",
-                "agent": "lead_manager",
-                "status": "active",
-                "message": "Lead Manager mock agent triggered manually",
-                "timestamp": datetime.now().isoformat(),
-            })
-            
-            # Simulate processing delay
-            import asyncio
-            await asyncio.sleep(1.5)
-            
-            # Simulate incoming email
-            await manager.send_update({
-                "type": "agent_status",
-                "agent": "lead_manager",
-                "status": "working",
-                "message": "📥 Received email reply from Demo Lead Alpha: 'Yes, we are interested in your services. Can we hop on a call this Thursday at 2 PM to discuss?'",
-                "timestamp": datetime.now().isoformat(),
-            })
-            
-            await asyncio.sleep(2)
-            
-            # Simulate CRM action
-            await manager.send_update({
-                "type": "agent_status",
-                "agent": "lead_manager",
-                "status": "idle",
-                "message": "✅ Lead recorded in CRM. Follow-up meeting scheduled for Thursday at 2 PM.",
-                "timestamp": datetime.now().isoformat(),
-            })
-            
-            return JSONResponse(
-                status_code=200,
-                content={"status": "success", "message": "Mock email processed"}
-            )
-        
-        # Real Mode Execution
-        # Send initial update
-        await manager.send_update({
-            "type": "agent_status",
-            "agent": "lead_manager",
-            "status": "active",
-            "message": "Lead Manager agent triggered manually",
-            "timestamp": datetime.now().isoformat(),
-        })
-        
-        # Call Lead Manager agent
-        result = await call_lead_manager_agent("check_lead_emails", session_id)
-        if not campaign_is_current(session_id):
-            return JSONResponse({"error": "Campaign was reset or superseded"}, status_code=409)
-        
-        if result["success"]:
-            logger.info(f"Lead Manager agent triggered successfully: {result['message']}")
-            
-            # Send success update
-            await manager.send_update({
-                "type": "agent_status", 
-                "agent": "lead_manager",
-                "status": "idle",
-                "message": result["message"] or "Lead management completed successfully",
-                "timestamp": datetime.now().isoformat(),
-            })
-            
-            return JSONResponse(
-                status_code=200,
-                content={
-                    "status": "success",
-                    "message": result["message"] or "Lead Manager agent triggered successfully",
-                    "timestamp": datetime.now().isoformat()
-                }
-            )
-        else:
-            logger.debug(f"Lead Manager agent failed: {result['error']}")
-            
-            # Send error update
-            await manager.send_update({
-                "type": "agent_status",
-                "agent": "lead_manager", 
-                "status": "error",
-                "message": f"Error: {result['error']}",
-                "timestamp": datetime.now().isoformat(),
-            })
-            
-            return JSONResponse(
-                status_code=500,
-                content={"error": result["error"]}
-            )
-            
-    except StoreConflict:
-        raise
-    except Exception as e:
-        logger.error(f"Error triggering Lead Manager agent: {e}", exc_info=True)
-        
-        # Send error update
-        await manager.send_update({
-            "type": "agent_status",
-            "agent": "lead_manager",
-            "status": "error", 
-            "message": f"Error triggering agent: {e}",
-            "timestamp": datetime.now().isoformat(),
-        })
-        
-        return JSONResponse(
-            status_code=500,
-            content={"error": f"Failed to trigger Lead Manager: {e}"}
-        )
+        return JSONResponse({"error":"Live workflow disabled in demo mode"},403)
+    if not app_state["session_id"]:
+        return JSONResponse({"error":"Start a campaign first"},409)
+    queued = await persist_pipeline({"type":"job_queued","agent":"lead_manager"},
+        dispatch={"kind":"lead_manager","payload":{"query":"check_lead_emails"},"mode":mode()})
+    return JSONResponse({"success":True,"job_id":queued["job_id"],"message":"Lead Manager queued"},202)
 
 @app.post("/api/human-input")
 async def receive_human_input_request(request: HumanInputRequest):
@@ -1674,7 +1675,7 @@ async def receive_human_input_request(request: HumanInputRequest):
     campaign = execution.get().campaign_id
     if request.campaign_id is not None and request.campaign_id != campaign:
         return JSONResponse({"error": "Request campaign does not match signer"}, status_code=409)
-    request = request.model_copy(update={"campaign_id": campaign})
+    request = request.model_copy(update={"campaign_id": campaign,"job_id":execution.get().job_id})
     # Store only the provenance verified from the service signature.
     app_state["human_input_requests"][request.request_id] = request
     
@@ -1724,8 +1725,15 @@ async def submit_human_input_response(request_id: str, response: HumanInputRespo
     success = False
     agent_url = os.environ.get("SDR_SERVICE_URL", config.DEFAULT_SDR_URL).rstrip("/")
     callback_url = f"{agent_url}/api/human-input/{request_id}"
+    approval_context = campaign_context(session_id)
+    if original_request.job_id:
+        with WorkStore().connection() as connection:
+            job=connection.execute("SELECT * FROM dispatch_jobs WHERE owner=? AND id=? AND state='running'",(execution.get().owner,original_request.job_id)).fetchone()
+            if not job:
+                return JSONResponse({"error":"Approval job is no longer active"},409)
+            approval_context=Execution(execution.get().owner,job['mode'],session_id,job['id'],job['claim_token'])
     try:
-        async with httpx.AsyncClient(auth=ServiceAuth("ui-client", "sdr", campaign_context(session_id)), timeout=10.0) as client:
+        async with httpx.AsyncClient(auth=ServiceAuth("ui-client", "sdr", approval_context), timeout=10.0) as client:
             agent_resp = await client.post(
                 callback_url,
                 json={"url": response.response},

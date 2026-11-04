@@ -12,6 +12,7 @@ from a2a.server.tasks import TaskUpdater
 from a2a.types import DataPart, Part
 
 from google.adk import Runner
+from google.adk.agents.run_config import RunConfig
 from google.adk.artifacts import InMemoryArtifactService
 from google.adk.memory import InMemoryMemoryService
 from google.adk.sessions import InMemorySessionService, Session
@@ -45,6 +46,11 @@ class LeadManagerAgentExecutor(AgentExecutor):
         logger.info("LeadManagerAgentExecutor initialized with ADK Runner.")
 
     async def execute(self, context: RequestContext, event_queue: EventQueue):
+        from common.execution_store import WorkStore, PolicyDenied
+        job = WorkStore().require_job()
+        if job["kind"] != "lead_manager":
+            raise PolicyDenied("Job kind does not authorize this agent")
+        WorkStore().workflow_preflight()
         owner_id_for_adk, scoped_session_id = agent_session_identity(context.context_id, context.task_id)
         task_updater = TaskUpdater(event_queue, context.task_id, context.context_id)
 
@@ -151,6 +157,7 @@ class LeadManagerAgentExecutor(AgentExecutor):
                 user_id=owner_id_for_adk,
                 session_id=session_id_for_adk,
                 new_message=adk_content,
+                run_config=RunConfig(max_llm_calls=8),
             ):
                 log_entry = f" ** - - - - - ** \n [Event] Author: {event.author}, \n Type: {type(event).__name__}, \n Final: {event.is_final_response()}, \n Content: {event.content}"
                 log_to_file(log_entry)

@@ -8,7 +8,7 @@ import sqlite3
 import time
 import uuid
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 class StoreConflict(ValueError):
@@ -53,6 +53,10 @@ class Store:
                 return
             if version == 1:
                 self._migrate_v2(connection)
+                self._migrate_v3(connection)
+                return
+            if version == 2:
+                self._migrate_v3(connection)
                 return
             schema = """
                 CREATE TABLE IF NOT EXISTS tenants (
@@ -108,6 +112,12 @@ class Store:
                     connection.execute("INSERT OR IGNORE INTO integration_connections VALUES (?, 'google', ?, 1, 1, ?)",
                                        (identity, user["id"], now()))
             self._migrate_v2(connection)
+            self._migrate_v3(connection)
+
+    def _migrate_v3(self, connection):
+        from common.execution_store import create_schema
+        create_schema(connection)
+        connection.execute("PRAGMA user_version=3")
 
     def _migrate_v2(self, connection):
         connection.execute("ALTER TABLE pipeline_snapshots ADD COLUMN revision INTEGER NOT NULL DEFAULT 1")
@@ -162,7 +172,7 @@ class Store:
             row = connection.execute("SELECT data FROM pipeline_snapshots WHERE tenant_id=?", (identity,)).fetchone()
         return json.loads(row[0]) if row else None
 
-    def save(self, owner, snapshot, event=None, *, expected_revision=0, worker_id=None):
+    def save(self, owner, snapshot, event=None, *, expected_revision=0, worker_id=None, dispatch=None):
         # Serialize before beginning a transaction; invalid payloads change nothing.
         if type(expected_revision) is not int or expected_revision < 0:
             raise ValueError("An explicit nonnegative revision is required")
@@ -171,7 +181,7 @@ class Store:
         with self.connection() as connection:
             connection.execute("BEGIN IMMEDIATE")
             identity = tenant_id(owner)
-            row = connection.execute("SELECT revision FROM pipeline_snapshots WHERE tenant_id=?", (identity,)).fetchone()
+            row = connection.execute("SELECT revision,data FROM pipeline_snapshots WHERE tenant_id=?", (identity,)).fetchone()
             if worker_id and not connection.execute("SELECT 1 FROM runtime_workers WHERE id=? AND expires_at>?", (worker_id, time.time())).fetchone():
                 raise StoreConflict("Worker lease expired; restart this worker before writing")
             actual_revision = row[0] if row else 0
@@ -180,6 +190,10 @@ class Store:
             identity = self._tenant(connection, owner)
             revision = actual_revision + 1
             campaign = snapshot.get("session_id")
+            old_campaign = json.loads(row[1]).get("session_id") if row else None
+            if old_campaign and old_campaign != campaign:
+                from common.execution_store import cancel_in_transaction
+                cancel_in_transaction(connection, owner, old_campaign)
             timestamp = now()
             if campaign:
                 state = "running" if snapshot.get("is_running") else "idle"
@@ -208,15 +222,21 @@ class Store:
                     connection.execute("UPDATE jobs SET state=?,updated_at=? WHERE tenant_id=? AND id=?",
                                        (state, timestamp, identity, "discovery:" + campaign))
 
-        return {"revision": revision, "event_id": event_id}
+            queued_job = None
+            if dispatch is not None:
+                from common.execution_store import enqueue
+                if not campaign:
+                    raise ValueError("A durable job requires an active campaign")
+                queued_job = enqueue(connection,owner,campaign,dispatch['kind'],dispatch['payload'],dispatch['mode'])
+        return {"revision": revision, "event_id": event_id, "job_id": queued_job}
 
     def interrupt_incomplete(self, owner):
         """Mark lost in-process work accurately; never replay provider actions on restart."""
         identity = tenant_id(owner)
         with self.connection() as connection:
             connection.execute("BEGIN IMMEDIATE")
-            connection.execute("UPDATE jobs SET state='interrupted',updated_at=? WHERE tenant_id=? AND state IN ('queued','running') AND (worker_id IS NULL OR NOT EXISTS (SELECT 1 FROM runtime_workers WHERE id=jobs.worker_id AND expires_at>?))",
-                               (now(), identity, time.time()))
+            connection.execute("UPDATE jobs SET state='interrupted',updated_at=? WHERE tenant_id=? AND state IN ('queued','running') AND NOT EXISTS (SELECT 1 FROM dispatch_jobs WHERE owner=? AND campaign=jobs.campaign_id) AND (worker_id IS NULL OR NOT EXISTS (SELECT 1 FROM runtime_workers WHERE id=jobs.worker_id AND expires_at>?))",
+                               (now(), identity, owner.lower(), time.time()))
             row = connection.execute("SELECT data,revision FROM pipeline_snapshots WHERE tenant_id=?", (identity,)).fetchone()
             if row:
                 snapshot = json.loads(row[0])

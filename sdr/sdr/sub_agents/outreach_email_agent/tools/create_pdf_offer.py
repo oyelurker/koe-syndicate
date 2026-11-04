@@ -397,7 +397,7 @@ def create_sales_proposal_pdf(markdown_offer: str) -> str:
     """Creates a PDF sales proposal file from Markdown offer.
 
     This function takes Markdown-formatted content, converts it into a styled
-    PDF document, and saves it to the current working directory. Returnting the 'offer_file_path' key.
+    PDF document, and saves it in the verified owner/campaign artifact directory. Returnting the 'offer_file_path' key.
 
     Args:
         markdown_offer (str): The Markdown content representing the sales proposal.
@@ -410,10 +410,14 @@ def create_sales_proposal_pdf(markdown_offer: str) -> str:
     """
     logger.info("⚒️ [TOOL] Starting PDF generation process with `create_sales_proposal_pdf` function.")
     logger.debug(f"Markdown content length: {len(markdown_offer)} characters")
-    
-    
-    current_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
-    output_pdf_file = os.path.join(current_dir, "ZemZenProposal.pdf")
+
+
+    from common.execution_store import WorkStore, artifact_directory
+    import hashlib
+    WorkStore().require_job()
+    current_dir = artifact_directory()
+    current_dir.mkdir(parents=True,exist_ok=True)
+    output_pdf_file = str(current_dir / (hashlib.sha256(markdown_offer.encode()).hexdigest()+".pdf"))
 
     try:
         doc = SimpleDocTemplate(
@@ -441,5 +445,5 @@ def create_sales_proposal_pdf(markdown_offer: str) -> str:
     except Exception as e:
         logger.error(f"Error generating PDF: {e}", exc_info=True)
         raise
-    
+
 create_offer_file = FunctionTool(func=create_sales_proposal_pdf)

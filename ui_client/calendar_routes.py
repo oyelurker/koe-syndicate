@@ -1,5 +1,6 @@
 """Owner-scoped Calendar gateway. OAuth tokens never leave the UI service."""
 import asyncio
+import json
 from datetime import datetime, timedelta
 from typing import Optional
 from zoneinfo import ZoneInfo
@@ -11,6 +12,7 @@ from pydantic import BaseModel, Field, ConfigDict
 
 from common.security import execution, require_owner, require_action, SecurityError
 from . import db
+from common.execution_store import WorkStore, normalize_email, cached_result
 
 router = APIRouter(prefix="/internal/calendar")
 
@@ -80,44 +82,73 @@ async def availability(req: Availability):
         return JSONResponse({"success": False, "error": "Calendar availability failed"}, 502)
 
 
+def confirmed_meeting(event, req, key):
+    return {"success":True,"meeting_id":event["id"],"calendar_link":event.get("htmlLink"),
+        "title":event.get("summary"),"start_time":event.get("start",{}).get("dateTime"),
+        "end_time":event.get("end",{}).get("dateTime"),"lead_name":req.lead_name,
+        "lead_email":req.lead_email,"attendees":[req.lead_email]+req.attendees,"action_key":key}
+
+
+async def reconcile_meeting(key):
+    ledger=WorkStore(); row=await asyncio.to_thread(ledger.action,key)
+    if not row or row["kind"]!="calendar":
+        return {"success":False,"error":"Calendar action not found"}
+    if row["state"] in {"succeeded","failed"}:
+        return cached_result(row)
+    try:
+        service=await owner_service()
+        event=await asyncio.wait_for(asyncio.to_thread(lambda: service.events().get(calendarId="primary",eventId=key).execute(num_retries=0)),15)
+        if event.get("extendedProperties",{}).get("private",{}).get("koe_action_key")!=key:
+            return {"success":False,"error":"Provider evidence does not match this action"}
+        req=Meeting.model_validate(json.loads(row["payload"]))
+        result=confirmed_meeting(event,req,key)
+        await asyncio.to_thread(ledger.record,key,"succeeded",result,event["id"])
+        return result
+    except Exception:
+        return cached_result(row)
+
+
 @router.post("/meeting")
 async def meeting(req: Meeting):
+    key=None; dispatched=False; ledger=WorkStore()
     try:
         require_action("calendar")
-        service = await owner_service()
-        slots = await asyncio.to_thread(free_slots, service, 30, req.duration_minutes)
-        if bool(req.preferred_date) != bool(req.preferred_time):
-            raise ValueError("Provide both preferred date and time")
-        if req.preferred_date:
-            start = datetime.strptime(req.preferred_date + " " + req.preferred_time, "%Y-%m-%d %H:%M").replace(tzinfo=ZoneInfo(slots["timezone"]))
-        elif slots["available_slots"]:
-            start = datetime.fromisoformat(slots["available_slots"][0]["start"])
-        else:
-            raise ValueError("No available appointment slots")
-        end = start + timedelta(minutes=req.duration_minutes)
-        if start <= datetime.now(start.tzinfo):
+        emails=sorted(set(normalize_email(email) for email in [req.lead_email]+req.attendees))
+        req=req.model_copy(update={"lead_email":normalize_email(req.lead_email),"attendees":sorted(set(normalize_email(e) for e in req.attendees))})
+        if not req.preferred_date or not req.preferred_time:
+            raise ValueError("An explicit approved meeting date and time are required")
+        key=await asyncio.to_thread(ledger.propose,"calendar",emails,req.model_dump(mode="json"))
+        row=await asyncio.to_thread(ledger.reserve,key,len(emails))
+        if row["state"]!="reserved":
+            return await reconcile_meeting(key)
+        service=await owner_service()
+        slots=await asyncio.to_thread(free_slots,service,30,req.duration_minutes)
+        start=datetime.strptime(req.preferred_date+" "+req.preferred_time,"%Y-%m-%d %H:%M").replace(tzinfo=ZoneInfo(slots["timezone"]))
+        end=start+timedelta(minutes=req.duration_minutes)
+        if start<=datetime.now(start.tzinfo):
             raise ValueError("Meeting must be in the future")
         def insert():
-            # Check just before insertion. Strong scheduling concurrency is P1.
-            result = service.freebusy().query(body={"timeMin": start.isoformat(), "timeMax": end.isoformat(), "items": [{"id": "primary"}]}).execute()
-            cal = result["calendars"]["primary"]
-            if cal.get("errors") or cal.get("busy"):
+            nonlocal dispatched
+            busy=service.freebusy().query(body={"timeMin":start.isoformat(),"timeMax":end.isoformat(),"items":[{"id":"primary"}]}).execute(num_retries=0)["calendars"]["primary"]
+            if busy.get("errors") or busy.get("busy"):
                 raise ValueError("Calendar slot unavailable")
-            emails = list(dict.fromkeys([req.lead_email] + req.attendees))
-            if any("@" not in email or any(c in email for c in "\r\n") for email in emails):
-                raise ValueError("Invalid attendee email")
-            require_action("calendar")
-            return service.events().insert(calendarId="primary", sendUpdates="all", body={
-                "summary": req.meeting_subject or "Sales Discussion - " + req.lead_name,
-                "description": req.description or "", "start": {"dateTime": start.isoformat()},
-                "end": {"dateTime": end.isoformat()}, "attendees": [{"email": email} for email in emails]}).execute()
-        event = await asyncio.to_thread(insert)
-        return {"success": True, "meeting_id": event["id"], "calendar_link": event.get("htmlLink"),
-                "title": event.get("summary"), "start_time": start.isoformat(), "end_time": end.isoformat(),
-                "lead_name": req.lead_name, "lead_email": req.lead_email, "attendees": [req.lead_email] + req.attendees}
+            ledger.begin(key)
+            dispatched=True
+            event=service.events().insert(calendarId="primary",sendUpdates="all",body={
+                "id":key,"summary":req.meeting_subject or "Sales Discussion - "+req.lead_name,
+                "description":req.description or "","start":{"dateTime":start.isoformat()},
+                "end":{"dateTime":end.isoformat()},"attendees":[{"email":email} for email in emails],
+                "extendedProperties":{"private":{"koe_action_key":key}}}).execute(num_retries=0)
+            result=confirmed_meeting(event,req,key)
+            ledger.record(key,"succeeded",result,event["id"])
+            return result
+        return await asyncio.wait_for(asyncio.to_thread(insert),20)
     except SecurityError as exc:
-        return JSONResponse({"success": False, "error": str(exc)}, 403)
+        return JSONResponse({"success":False,"error":str(exc),"action_key":key},403)
     except ValueError as exc:
-        return JSONResponse({"success": False, "error": str(exc)}, 400)
+        return JSONResponse({"success":False,"error":str(exc),"action_key":key},400)
     except Exception:
-        return JSONResponse({"success": False, "error": "Calendar booking failed"}, 502)
+        result={"success":False,"error":"Calendar outcome is uncertain; reconcile before retrying","action_key":key}
+        if dispatched:
+            await asyncio.to_thread(ledger.record,key,"unknown",result)
+        return JSONResponse(result,502)

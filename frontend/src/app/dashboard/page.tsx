@@ -307,7 +307,7 @@ function DashboardContent() {
       id: `u${Date.now()}`,
       timestamp: new Date().toISOString(),
       agent_type: 'sdr',
-      message: `Attempting outbound call to ${business.name} at ${phoneOverride}...`
+      message: `Submitting outreach job for ${business.name}...`
     }]);
 
     try {
@@ -330,10 +330,9 @@ function DashboardContent() {
         return;
       }
 
-      // Real call succeeded
+      const accepted = await res.json();
       setSelectedBusiness(null);
-      setBusinesses(prev => prev.map(b => b.id === business.id ? { ...b, status: 'contacted' } : b));
-      setUpdates(prev => [...prev, { id: `u${Date.now()}`, timestamp: new Date().toISOString(), agent_type: 'sdr', message: `Live call initiated to ${business.name}. Context transferred.` }]);
+      setUpdates(prev => [...prev, { id: `u${Date.now()}`, timestamp: new Date().toISOString(), agent_type: 'sdr', message: accepted.message || 'Outreach queued. Awaiting a confirmed provider result.' }]);
       
     } catch {
       setCreditsError("Unable to reach the outreach service. No successful call has been confirmed.");

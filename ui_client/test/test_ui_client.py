@@ -95,13 +95,14 @@ class TestUIClient:
     
     def test_start_lead_finding_valid_input(self, client, reset_app_state):
         """Test starting lead finding with valid city input."""
-        with patch("ui_client.main.run_lead_finding_process") as mock_process:
+        with patch("ui_client.main.WorkStore.claim", return_value=None):
             response = client.post("/start_lead_finding", data={"city": "New York"})
             assert response.status_code == 303  # Redirect
             assert app_state["current_city"] == "New York"
             assert app_state["is_running"] is True
             assert app_state["session_id"] is not None
-            mock_process.assert_called_once()
+            from common.execution_store import WorkStore
+            assert WorkStore().jobs("owner@example.test")[0]["kind"] == "discovery"
     
     def test_start_lead_finding_empty_city(self, client, reset_app_state):
         """Test starting lead finding with empty city input."""

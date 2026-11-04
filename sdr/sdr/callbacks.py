@@ -39,6 +39,12 @@ def send_sdr_update_to_ui(business_data: dict, email_sent_result: Optional[dict]
     Sends a single business update to the UI client's /agent_callback endpoint.
     This function will now ensure a 'city' field is present in the 'data' payload.
     """
+    from common.execution_store import WorkStore
+    if (not isinstance(email_sent_result,dict) or email_sent_result.get('status')!='success'
+            or not WorkStore().confirmed(email_sent_result.get('action_key'),'email',email_sent_result.get('message_id'))):
+        return False
+    receipt_payload = json.loads(WorkStore().action(email_sent_result['action_key'])['payload'])
+    email_sent_result = {**email_sent_result, 'crafted_email': receipt_payload}
     ui_client_url = os.environ.get(
         "UI_CLIENT_SERVICE_URL", config.DEFAULT_UI_CLIENT_URL
     ).rstrip("/")
@@ -116,6 +122,8 @@ def send_sdr_update_to_ui(business_data: dict, email_sent_result: Optional[dict]
             "phone": data_for_ui.get("phone"),
             "email": data_for_ui.get("email"),
             "email_subject": email_subject,
+            "action_key":email_sent_result["action_key"],
+            "message_id":email_sent_result["message_id"],
             "body_preview": body_preview
         }
     }
@@ -170,41 +178,10 @@ async def post_results_callback(callback_context: CallbackContext) -> Optional[g
 
     email_sent_result = safe_json_parse(context_state.get('email_sent_result'), 'email_sent_result')
 
-    # If email_sent_result doesn't exist, try to construct it from crafted_email
-    if email_sent_result is None:
-        crafted_email = safe_json_parse(context_state.get('crafted_email'), 'crafted_email')
-        if crafted_email:
-            # Create the expected structure for UI callback
-            email_sent_result = {
-                'email_sent_result': {
-                    'status': 'success',
-                    'message': 'Email sent successfully',
-                    'crafted_email': crafted_email
-                }
-            }
-            logger.debug("Sensitive payload omitted")
-        else:
-            logger.info(f"SDR [Callback] No email data found in state for agent: {agent_name}, proceeding with business data only")
-
-    logger.info(f"SDR [Callback] Business data and email sent result parsed successfully.")
-
-    # Send UI update with the parsed data
-    ui_update_success = False
-    if email_sent_result and 'email_sent_result' in email_sent_result:
-        # Pass the inner dictionary, which contains 'crafted_email'
-        ui_update_success = send_sdr_update_to_ui(business_data, email_sent_result['email_sent_result'])
-        if ui_update_success:
-            logger.info(f"SDR [Callback] UI update sent successfully for business: {business_data.get('name')}")
-        else:
-            logger.error(f"SDR [Callback] Failed to send UI update for business: {business_data.get('name')}")
-    else:
-        logger.warning("SDR [Callback] 'email_sent_result' key not found in the parsed object.")
-        # Still try to send UI update with business data only
-        ui_update_success = send_sdr_update_to_ui(business_data, None)
-        if ui_update_success:
-            logger.info(f"SDR [Callback] UI update sent successfully without email data for business: {business_data.get('name')}")
-        else:
-            logger.error(f"SDR [Callback] Failed to send UI update without email data for business: {business_data.get('name')}")
+    if isinstance(email_sent_result,dict) and 'email_sent_result' in email_sent_result:
+        email_sent_result = safe_json_parse(email_sent_result['email_sent_result'],'email_sent_result')
+    # A draft is not evidence of a sent email. The sender validates the durable receipt.
+    ui_update_success = send_sdr_update_to_ui(business_data,email_sent_result)
 
     try:
         # Saving artifacts

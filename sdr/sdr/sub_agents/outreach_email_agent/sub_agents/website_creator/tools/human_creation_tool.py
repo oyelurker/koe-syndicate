@@ -36,8 +36,8 @@ class HumanRequest:
 
 class HumanInteractionManager:
     _instance = None
-    _pending_requests: Dict[tuple[str, str, str], HumanRequest] = {}
-    _active_sessions: set[tuple[str, str, str]] = set()  # Track active sessions to prevent duplicates
+    _pending_requests: Dict[tuple[str, str, str, str], HumanRequest] = {}
+    _active_sessions: set[tuple[str, str, str, str]] = set()  # Track active sessions to prevent duplicates
     
     def __new__(cls):
         if cls._instance is None:
@@ -56,7 +56,7 @@ class HumanInteractionManager:
         if context is None or not context.campaign_id:
             raise SecurityError("Human requests require verified owner and campaign")
         verified = campaign_context(context.campaign_id)
-        return verified.owner.strip().lower(), verified.campaign_id, value
+        return verified.owner.strip().lower(), verified.campaign_id, verified.job_id or "", value
 
     def get_request(self, request_id: str) -> Optional[HumanRequest]:
         return self._pending_requests.get(self._key(request_id))
