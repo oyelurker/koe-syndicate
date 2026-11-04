@@ -6,12 +6,21 @@
 #
 a2a-sdk==0.2.5
     # via -r lead_manager/requirements.in
+absolufy-imports==0.3.1
+    # via google-adk
+aiohappyeyeballs==2.7.1
+    # via aiohttp
+aiohttp==3.14.5
+    # via google-cloud-aiplatform
+aiosignal==1.4.0
+    # via aiohttp
 annotated-doc==0.0.5
     # via fastapi
 annotated-types==0.8.0
     # via pydantic
 anyio==4.15.1
     # via
+    #   google-adk
     #   google-genai
     #   httpx
     #   httpx2
@@ -20,6 +29,7 @@ anyio==4.15.1
     #   starlette
 attrs==26.1.0
     # via
+    #   aiohttp
     #   jsonschema
     #   referencing
 authlib==1.9.1
@@ -41,6 +51,8 @@ click==8.5.0
     #   -r lead_manager/requirements.in
     #   google-adk
     #   uvicorn
+cloudpickle==3.1.2
+    # via google-cloud-aiplatform
 cryptography==50.0.2
     # via
     #   authlib
@@ -55,7 +67,11 @@ docstring-parser==0.18.0
     # via google-cloud-aiplatform
 fastapi==0.162.0
     # via google-adk
-google-adk==1.0.0
+frozenlist==1.8.0
+    # via
+    #   aiohttp
+    #   aiosignal
+google-adk==1.10.0
     # via -r lead_manager/requirements.in
 google-api-core==2.43.2
     # via
@@ -132,6 +148,7 @@ googleapis-common-protos==1.76.0
     #   google-api-core
     #   grpc-google-iam-v1
     #   grpcio-status
+    #   opentelemetry-exporter-otlp-proto-http
 graphviz==0.21
     # via google-adk
 grpc-google-iam-v1==0.14.6
@@ -178,6 +195,7 @@ idna==3.20
     #   httpx
     #   httpx2
     #   requests
+    #   yarl
 joserfc==1.7.7
     # via authlib
 jsonschema==4.26.0
@@ -190,6 +208,10 @@ mcp==2.3.0
     #   google-adk
 mcp-types==2.3.0
     # via mcp
+multidict==7.2.1
+    # via
+    #   aiohttp
+    #   yarl
 opentelemetry-api==1.45.2
     # via
     #   -r lead_manager/requirements.in
@@ -199,18 +221,35 @@ opentelemetry-api==1.45.2
     #   google-api-core
     #   mcp
     #   opentelemetry-exporter-gcp-trace
+    #   opentelemetry-exporter-http-transport
+    #   opentelemetry-exporter-otlp-proto-http
     #   opentelemetry-resourcedetector-gcp
     #   opentelemetry-sdk
     #   opentelemetry-semantic-conventions
 opentelemetry-exporter-gcp-trace==1.15.0
     # via google-adk
+opentelemetry-exporter-http-transport==0.66b2
+    # via opentelemetry-exporter-otlp-proto-http
+opentelemetry-exporter-otlp-common==0.66b2
+    # via opentelemetry-exporter-otlp-proto-http
+opentelemetry-exporter-otlp-proto-common==1.45.2
+    # via opentelemetry-exporter-otlp-proto-http
+opentelemetry-exporter-otlp-proto-http==1.45.2
+    # via google-cloud-aiplatform
+opentelemetry-proto==1.45.2
+    # via
+    #   opentelemetry-exporter-otlp-proto-common
+    #   opentelemetry-exporter-otlp-proto-http
 opentelemetry-resourcedetector-gcp==1.14.0
     # via opentelemetry-exporter-gcp-trace
 opentelemetry-sdk==1.45.2
     # via
     #   a2a-sdk
     #   google-adk
+    #   google-cloud-aiplatform
     #   opentelemetry-exporter-gcp-trace
+    #   opentelemetry-exporter-otlp-common
+    #   opentelemetry-exporter-otlp-proto-http
     #   opentelemetry-resourcedetector-gcp
 opentelemetry-semantic-conventions==0.66b2
     # via opentelemetry-sdk
@@ -218,6 +257,10 @@ packaging==26.3
     # via
     #   google-cloud-aiplatform
     #   google-cloud-bigquery
+propcache==0.5.4
+    # via
+    #   aiohttp
+    #   yarl
 proto-plus==1.29.0
     # via
     #   google-api-core
@@ -237,6 +280,7 @@ protobuf==7.36.2
     #   googleapis-common-protos
     #   grpc-google-iam-v1
     #   grpcio-status
+    #   opentelemetry-proto
     #   proto-plus
 pyasn1==0.6.5
     # via pyasn1-modules
@@ -261,7 +305,9 @@ pyjwt==2.15.1
 pyparsing==3.3.3
     # via httplib2
 python-dateutil==2.9.0.post0
-    # via google-cloud-bigquery
+    # via
+    #   google-adk
+    #   google-cloud-bigquery
 python-dotenv==1.2.4
     # via
     #   -r lead_manager/requirements.in
@@ -270,8 +316,6 @@ python-multipart==0.0.32
     # via mcp
 pytz==2026.6
     # via -r lead_manager/requirements.in
-pywin32==312 ; sys_platform == "win32"
-    # via mcp
 pyyaml==6.0.3
     # via google-adk
 referencing==0.37.0
@@ -281,11 +325,14 @@ referencing==0.37.0
 requests==2.34.2
     # via
     #   -r lead_manager/requirements.in
+    #   google-adk
     #   google-api-core
     #   google-auth
     #   google-cloud-bigquery
     #   google-cloud-storage
     #   google-genai
+    #   opentelemetry-exporter-http-transport
+    #   opentelemetry-exporter-otlp-proto-http
     #   opentelemetry-resourcedetector-gcp
 rpds-py==2026.9.1
     # via
@@ -306,18 +353,24 @@ starlette==1.10.0
     #   -r lead_manager/requirements.in
     #   a2a-sdk
     #   fastapi
+    #   google-adk
     #   mcp
     #   sse-starlette
 tenacity==9.1.4
-    # via google-genai
+    # via
+    #   google-adk
+    #   google-genai
 truststore==0.10.5
     # via
     #   httpcore2
     #   httpx2
 typing-extensions==4.16.0
     # via
+    #   aiohttp
+    #   aiosignal
     #   anyio
     #   fastapi
+    #   google-adk
     #   google-cloud-aiplatform
     #   google-genai
     #   grpcio
@@ -326,6 +379,7 @@ typing-extensions==4.16.0
     #   mcp-types
     #   opentelemetry-api
     #   opentelemetry-exporter-gcp-trace
+    #   opentelemetry-exporter-otlp-proto-http
     #   opentelemetry-sdk
     #   opentelemetry-semantic-conventions
     #   pydantic
@@ -340,9 +394,7 @@ typing-inspection==0.4.4
     #   mcp
     #   pydantic
 tzdata==2026.6
-    # via
-    #   -r lead_manager/requirements.in
-    #   tzlocal
+    # via -r lead_manager/requirements.in
 tzlocal==5.4.5
     # via google-adk
 uritemplate==4.2.0
@@ -354,7 +406,13 @@ uvicorn==0.54.0
     #   -r lead_manager/requirements.in
     #   google-adk
     #   mcp
+watchdog==7.0.0
+    # via google-adk
 websockets==17.4
-    # via google-genai
+    # via
+    #   google-adk
+    #   google-genai
 wrapt==2.5.2
     # via deprecated
+yarl==1.25.1
+    # via aiohttp
