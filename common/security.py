@@ -8,6 +8,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import secrets
 import sqlite3
 import time
@@ -28,6 +29,7 @@ class SecurityError(ValueError):
 class Execution:
     owner: str
     mode: str
+    campaign_id: str | None = None
 
 
 execution: ContextVar[Execution | None] = ContextVar("koe_execution", default=None)
@@ -40,6 +42,28 @@ def owner_email():
 def require_owner(email):
     if not owner_email() or not email or email.lower() != owner_email():
         raise SecurityError("This instance is restricted to its configured owner")
+
+
+def campaign_context(campaign_id):
+    context = execution.get()
+    if context is None:
+        raise SecurityError("Missing verified execution owner")
+    require_owner(context.owner)
+    if not isinstance(campaign_id, str) or not re.fullmatch(r"[A-Za-z0-9._:-]{1,128}", campaign_id):
+        raise SecurityError("Missing or invalid campaign identity")
+    if context.campaign_id and context.campaign_id != campaign_id:
+        raise SecurityError("Campaign identity mismatch")
+    return Execution(context.owner, context.mode, campaign_id)
+
+
+def agent_session_identity(campaign_id, task_id):
+    """Use verified identity, never model-supplied owner/session state."""
+    context = campaign_context(campaign_id)
+    if execution.get().campaign_id != campaign_id or not task_id:
+        raise SecurityError("Agent task requires a signed campaign identity")
+    owner_id = hashlib.sha256(context.owner.strip().lower().encode()).hexdigest()
+    session_id = hashlib.sha256(json.dumps([campaign_id, task_id]).encode()).hexdigest()
+    return owner_id, session_id
 
 
 def mode():
@@ -101,8 +125,8 @@ def service_url(audience):
     return os.getenv(key, defaults[audience]).rstrip("/")
 
 
-def canonical(caller, audience, owner, run_mode, timestamp, nonce, method, target, body):
-    return "\n".join((caller, audience, owner, run_mode, timestamp, nonce, method.upper(), target,
+def canonical(caller, audience, owner, run_mode, timestamp, nonce, method, target, body, campaign_id=""):
+    return "\n".join((caller, audience, owner, run_mode, campaign_id, timestamp, nonce, method.upper(), target,
                       hashlib.sha256(body).hexdigest())).encode()
 
 
@@ -117,6 +141,8 @@ class ServiceAuth(httpx.Auth):
         if context is None:
             raise SecurityError("Missing execution context for internal request")
         require_owner(context.owner)
+        if context.campaign_id and not re.fullmatch(r"[A-Za-z0-9._:-]{1,128}", context.campaign_id):
+            raise SecurityError("Invalid campaign identity")
         expected = urlsplit(service_url(self.audience))
         actual = urlsplit(str(request.url))
         if (actual.scheme, actual.netloc) != (expected.scheme, expected.netloc):
@@ -128,9 +154,9 @@ class ServiceAuth(httpx.Auth):
         target = request.url.raw_path.decode("ascii")
         signature = hmac.new(service_key(self.caller).encode(), canonical(
             self.caller, self.audience, context.owner, run_mode, timestamp, nonce,
-            request.method, target, request.content), hashlib.sha256).hexdigest()
+            request.method, target, request.content, context.campaign_id or ""), hashlib.sha256).hexdigest()
         request.headers.update({"X-Koe-Caller": self.caller, "X-Koe-Audience": self.audience,
-            "X-Koe-Owner": context.owner, "X-Koe-Mode": run_mode, "X-Koe-Time": timestamp,
+            "X-Koe-Campaign": context.campaign_id or "", "X-Koe-Owner": context.owner, "X-Koe-Mode": run_mode, "X-Koe-Time": timestamp,
             "X-Koe-Nonce": nonce, "X-Koe-Signature": signature})
         yield request
 
@@ -138,6 +164,9 @@ class ServiceAuth(httpx.Auth):
 def verify_request(headers, method, target, body, audience, allowed_callers):
     caller = headers.get("x-koe-caller", "")
     owner = headers.get("x-koe-owner", "")
+    campaign_id = headers.get("x-koe-campaign", "")
+    if campaign_id and not re.fullmatch(r"[A-Za-z0-9._:-]{1,128}", campaign_id):
+        raise SecurityError("Invalid campaign identity")
     run_mode = headers.get("x-koe-mode", "")
     timestamp = headers.get("x-koe-time", "")
     nonce = headers.get("x-koe-nonce", "")
@@ -153,11 +182,11 @@ def verify_request(headers, method, target, body, audience, allowed_callers):
     if abs(time.time() - issued) > 60:
         raise SecurityError("Expired request")
     expected = hmac.new(service_key(caller).encode(), canonical(caller, audience, owner,
-        run_mode, timestamp, nonce, method, target, body), hashlib.sha256).hexdigest()
+        run_mode, timestamp, nonce, method, target, body, campaign_id), hashlib.sha256).hexdigest()
     if not hmac.compare_digest(expected, headers.get("x-koe-signature", "")):
         raise SecurityError("Invalid signature")
     consume_once(audience + ":" + caller, nonce, issued + 120)
-    return Execution(owner, "demo" if mode() == "demo" else run_mode)
+    return Execution(owner, "demo" if mode() == "demo" else run_mode, campaign_id or None)
 
 
 class ServiceMiddleware:

@@ -177,7 +177,7 @@ def empty_pipeline_state():
 app_state = empty_pipeline_state()
 
 # Session Signer
-from common.security import ServiceAuth, SecurityError, require_action, mode
+from common.security import ServiceAuth, SecurityError, require_action, mode, campaign_context
 from .security import BrowserSecurityMiddleware, validate_config
 from .store import Store
 from . import db as token_db
@@ -205,10 +205,24 @@ def restore_pipeline(snapshot):
     app_state["human_input_requests"] = {key: HumanInputRequest.model_validate(value) for key, value in snapshot.get("human_input_requests", {}).items()}
 
 
+def campaign_is_current(campaign_id):
+    context = execution.get()
+    return bool(context and context.owner.lower() == owner_email()
+                and campaign_id and app_state["session_id"] == campaign_id)
+
+
+def require_current_campaign():
+    context = execution.get()
+    if not context or not campaign_is_current(context.campaign_id):
+        raise SecurityError("Campaign is missing, reset or superseded")
+
+
 async def persist_pipeline(event):
     context = execution.get()
     if context is None:
         raise SecurityError("Missing owner for persistent pipeline update")
+    if context.campaign_id:
+        require_current_campaign()
     if pipeline_store is None:
         raise RuntimeError("Persistent storage has not completed application startup")
     await asyncio.to_thread(pipeline_store.save, context.owner, pipeline_snapshot(), json.loads(json.dumps(event, default=str)))
@@ -415,7 +429,7 @@ async def call_lead_finder_agent_a2a(city: str, session_id: str, **kwargs) -> di
     }
     
     try:
-        async with httpx.AsyncClient(auth=ServiceAuth("ui-client", "lead-finder"), ) as http_client:
+        async with httpx.AsyncClient(auth=ServiceAuth("ui-client", "lead-finder", campaign_context(session_id)), ) as http_client:
             a2a_client = A2AClient(httpx_client=http_client, url=lead_finder_url)
             
             # Prepare A2A message
@@ -553,7 +567,7 @@ async def call_lead_finder_agent_simple(city: str, session_id: str, **kwargs) ->
     }
     
     try:
-        async with httpx.AsyncClient(auth=ServiceAuth("ui-client", "lead-finder"), timeout=300.0) as client:
+        async with httpx.AsyncClient(auth=ServiceAuth("ui-client", "lead-finder", campaign_context(session_id)), timeout=300.0) as client:
             # Try different endpoints that might exist
             endpoints_to_try = [
                 f"{lead_finder_url}/find_leads",
@@ -670,7 +684,7 @@ async def call_sdr_agent_a2a(business_data: dict[str, Any], session_id: str) -> 
     }
     
     try:
-        async with httpx.AsyncClient(auth=ServiceAuth("ui-client", "sdr"), timeout=300.0) as http_client:
+        async with httpx.AsyncClient(auth=ServiceAuth("ui-client", "sdr", campaign_context(session_id)), timeout=300.0) as http_client:
             a2a_client = A2AClient(httpx_client=http_client, url=sdr_url)
             
             # Prepare A2A message
@@ -752,7 +766,7 @@ async def call_sdr_agent_simple(business_data: dict[str, Any], session_id: str) 
     }
     
     try:
-        async with httpx.AsyncClient(auth=ServiceAuth("ui-client", "sdr"), timeout=300.0) as client:
+        async with httpx.AsyncClient(auth=ServiceAuth("ui-client", "sdr", campaign_context(session_id)), timeout=300.0) as client:
             # Try different endpoints that might exist
             endpoints_to_try = [
                 # f"{sdr_url}/engage_lead",
@@ -821,7 +835,7 @@ async def call_lead_manager_agent_a2a(query: str, session_id: str) -> dict[str, 
     }
     
     try:
-        async with httpx.AsyncClient(auth=ServiceAuth("ui-client", "lead-manager"), ) as http_client:
+        async with httpx.AsyncClient(auth=ServiceAuth("ui-client", "lead-manager", campaign_context(session_id)), ) as http_client:
             a2a_client = A2AClient(httpx_client=http_client, url=lead_manager_url)
             
             # Prepare A2A message
@@ -921,7 +935,7 @@ async def call_lead_manager_agent_simple(query: str, session_id: str) -> dict[st
     }
     
     try:
-        async with httpx.AsyncClient(auth=ServiceAuth("ui-client", "lead-manager"), ) as http_client:
+        async with httpx.AsyncClient(auth=ServiceAuth("ui-client", "lead-manager", campaign_context(session_id)), ) as http_client:
             payload = {
                 "query": query,
                 "ui_client_url": config.DEFAULT_UI_CLIENT_URL
@@ -964,6 +978,15 @@ async def call_lead_manager_agent(query: str, session_id: str) -> dict[str, Any]
         return await call_lead_manager_agent_simple(query, session_id)
 
 async def run_lead_finding_process(city: str, session_id: str, niche: str = ""):
+    token = execution.set(campaign_context(session_id))
+    try:
+        if campaign_is_current(session_id):
+            await _run_lead_finding_process(city, session_id, niche)
+    finally:
+        execution.reset(token)
+
+
+async def _run_lead_finding_process(city: str, session_id: str, niche: str = ""):
     """Run the complete lead finding process."""
     business_logger = logging.getLogger(BUSINESS_LOGIC_LOGGER)
     
@@ -972,6 +995,8 @@ async def run_lead_finding_process(city: str, session_id: str, niche: str = ""):
         
         # Call Lead Finder agent
         result = await call_lead_finder_agent(city, session_id, niche=niche)
+        if not campaign_is_current(session_id):
+            return
         
         if result["success"]:
             found_businesses = result.get("businesses", [])
@@ -979,6 +1004,8 @@ async def run_lead_finding_process(city: str, session_id: str, niche: str = ""):
             
             # Store businesses in UI state and notify the dashboard
             for b_data in found_businesses:
+                if not campaign_is_current(session_id):
+                    return
                 try:
                     biz_id = b_data.get("id", str(uuid.uuid4()))
                     new_biz = Business(
@@ -1036,6 +1063,8 @@ async def run_lead_finding_process(city: str, session_id: str, niche: str = ""):
             })
     
     except Exception as e:
+        if not campaign_is_current(session_id):
+            return
         business_logger.error(f"Error in lead finding process: {e}", exc_info=True)
         await manager.send_update({
             "type": "lead_finding_failed",
@@ -1044,13 +1073,13 @@ async def run_lead_finding_process(city: str, session_id: str, niche: str = ""):
         })
     
     finally:
-        # The process is no longer running, regardless of outcome
-        app_state["is_running"] = False
-        # Also send an update to the UI so it can re-enable buttons etc.
-        await manager.send_update({
-            "type": "process_finished",
-            "timestamp": datetime.now().isoformat(),
-        })
+        # Old work must never finish or publish into a reset/newer campaign.
+        if campaign_is_current(session_id):
+            app_state["is_running"] = False
+            await manager.send_update({
+                "type": "process_finished",
+                "timestamp": datetime.now().isoformat(),
+            })
 
 # WebSocket endpoint for real-time updates
 @app.websocket("/ws")
@@ -1086,6 +1115,11 @@ async def agent_callback(update: AgentUpdate):
     This version handles creating new businesses and correctly serializes
     Pydantic models before sending them over WebSockets.
     """
+    try:
+        require_current_campaign()
+    except SecurityError:
+        return JSONResponse({"error": "Campaign is missing, reset or superseded"}, status_code=409)
+
     logger.info(f"Received agent callback: {update.agent_type} for business {update.business_id}")
 
     # Special handling for Calendar agent: do not auto-create businesses, only send meeting notifications
@@ -1227,9 +1261,12 @@ async def start_lead_finding(city: str = Form(...), niche: str = Form(None)):
         
         app_state["is_running"] = True
         app_state["current_city"] = request_data.city
-        app_state["session_id"] = str(uuid.uuid4())
+        session_id = str(uuid.uuid4())
+        app_state["session_id"] = session_id
         app_state["businesses"] = {}  # Reset businesses for new search
         app_state["agent_updates"] = []  # Reset updates
+        app_state["human_input_requests"] = {}
+        app_state["lead_scores"] = {}
         
         logger.info(f"Starting lead finding process for city: {request_data.city}")
         
@@ -1241,7 +1278,7 @@ async def start_lead_finding(city: str = Form(...), niche: str = Form(None)):
         })
         
         # Call Lead Finder agent asynchronously
-        asyncio.create_task(run_lead_finding_process(request_data.city, app_state["session_id"], request_data.niche))
+        asyncio.create_task(run_lead_finding_process(request_data.city, session_id, request_data.niche))
         
         return RedirectResponse("/", status_code=303)
         
@@ -1307,12 +1344,16 @@ async def send_business_to_sdr(
             logger.info(f"Overriding phone number to: {user_phone} for business {business.name}")
         
         # Get current session ID
-        session_id = app_state["session_id"] or str(uuid.uuid4())
+        session_id = app_state["session_id"]
+        if not session_id:
+            return JSONResponse({"error": "Start a campaign before contacting a lead"}, status_code=409)
         
         logger.info(f"Sending business {business.name} to SDR agent")
         
         # Call SDR agent
         result = await call_sdr_agent(business_data, session_id)
+        if not campaign_is_current(session_id):
+            return JSONResponse({"error": "Campaign was reset or superseded"}, status_code=409)
         
         if result["success"]:
             # Send success update via WebSocket
@@ -1349,6 +1390,8 @@ async def reset_state():
     app_state["businesses"] = {}
     app_state["agent_updates"] = []
     app_state["session_id"] = None
+    app_state["human_input_requests"] = {}
+    app_state["lead_scores"] = {}
     
     await manager.send_update({
         "type": "state_reset",
@@ -1423,6 +1466,8 @@ async def trigger_lead_manager():
         
         # Call Lead Manager agent
         result = await call_lead_manager_agent("check_lead_emails", session_id)
+        if not campaign_is_current(session_id):
+            return JSONResponse({"error": "Campaign was reset or superseded"}, status_code=409)
         
         if result["success"]:
             logger.info(f"Lead Manager agent triggered successfully: {result['message']}")
@@ -1483,6 +1528,11 @@ async def receive_human_input_request(request: HumanInputRequest):
     """Receive a human input request from agents."""
     logger.info(f"Received human input request: {request.request_id} - {request.type}")
     
+    try:
+        require_current_campaign()
+    except SecurityError:
+        return JSONResponse({"error": "Campaign is missing, reset or superseded"}, status_code=409)
+
     # Store the request
     app_state["human_input_requests"][request.request_id] = request
     
@@ -1521,6 +1571,7 @@ async def submit_human_input_response(request_id: str, response: HumanInputRespo
     
     # Get the request first (but don't remove it yet)
     original_request = app_state["human_input_requests"].get(request_id)
+    session_id = app_state["session_id"]
     
     logger.info("Human input response submitted for %s", request_id)
     
@@ -1529,7 +1580,7 @@ async def submit_human_input_response(request_id: str, response: HumanInputRespo
     agent_url = os.environ.get("SDR_SERVICE_URL", config.DEFAULT_SDR_URL).rstrip("/")
     callback_url = f"{agent_url}/api/human-input/{request_id}"
     try:
-        async with httpx.AsyncClient(auth=ServiceAuth("ui-client", "sdr"), timeout=10.0) as client:
+        async with httpx.AsyncClient(auth=ServiceAuth("ui-client", "sdr", campaign_context(session_id)), timeout=10.0) as client:
             agent_resp = await client.post(
                 callback_url,
                 json={"url": response.response},
@@ -1545,6 +1596,9 @@ async def submit_human_input_response(request_id: str, response: HumanInputRespo
     except Exception as e:
         logger.error(f"Error notifying SDR agent for request {request_id}: {e}")
     
+    if not campaign_is_current(session_id):
+        return JSONResponse({"error": "Campaign was reset or superseded"}, status_code=409)
+
     # Only remove the request from UI state AFTER successful processing
     if success:
         app_state["human_input_requests"].pop(request_id, None)

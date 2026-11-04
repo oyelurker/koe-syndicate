@@ -1,0 +1,12 @@
+common/security.py
+lead_finder/agent_executor.py
+lead_manager/agent_executor.py
+sdr/agent_executor.py
+ui_client/main.py
+ui_client/test/test_ui_client.py
+tests/offline/test_storage.py
+tests/security/test_p0.py
+tests/security/test_campaigns.py
+docs/FIX-CHECKLIST.md
+docs/P1-CAMPAIGNS.md
+docs/P1-CAMPAIGNS-COMMIT-FILES.txt

@@ -22,7 +22,7 @@ from fastapi.testclient import TestClient
 from fastapi.websockets import WebSocket
 import httpx
 from google.oauth2.credentials import Credentials
-from common.security import Execution, ServiceAuth
+from common.security import Execution, ServiceAuth, execution
 from ui_client import db, security
 from a2a.types import Task, TaskStatus, TaskState, SendMessageResponse, SendMessageSuccessResponse, JSONRPCError, JSONRPCErrorResponse
 
@@ -31,7 +31,8 @@ from ui_client.main import app, app_state, manager, ConnectionManager, Business,
 
 def signed_callback(client, payload):
     request = httpx.Request("POST", "http://localhost:8000/agent_callback", json=payload)
-    signed = next(ServiceAuth("sdr", "ui-client", Execution("owner@example.test", "demo")).auth_flow(request))
+    app_state["session_id"] = app_state["session_id"] or "fixture-campaign"
+    signed = next(ServiceAuth("sdr", "ui-client", Execution("owner@example.test", "demo", app_state["session_id"])).auth_flow(request))
     return client.post(request.url.path, content=request.content, headers=dict(signed.headers))
 
 class TestUIClient:
@@ -312,7 +313,13 @@ class TestBusinessModels:
 
 class TestA2AIntegration:
     """Test A2A integration functionality."""
-    
+
+    @pytest.fixture(autouse=True)
+    def execution_owner(self):
+        token = execution.set(Execution("owner@example.test", "demo"))
+        yield
+        execution.reset(token)
+
     @pytest.mark.asyncio
     @pytest.mark.parametrize("state,success", [(TaskState.completed, True), (TaskState.failed, False)])
     async def test_call_lead_finder_task_response(self, state, success):

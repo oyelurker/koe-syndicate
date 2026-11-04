@@ -186,8 +186,9 @@ def test_real_app_restores_callback_state_after_restart():
         prepare()
         payload = {"agent_type": "sdr", "business_id": "saved-lead", "status": "engaged", "message": "Fixture update",
                    "data": {"name": "Persisted Business", "city": "Test City"}}
+        main.app_state["session_id"] = "fixture-campaign"
         request = httpx.Request("POST", "http://localhost:8000/agent_callback", json=payload)
-        signed = next(ServiceAuth("sdr", "ui-client", Execution(OWNER, "demo")).auth_flow(request))
+        signed = next(ServiceAuth("sdr", "ui-client", Execution(OWNER, "demo", "fixture-campaign")).auth_flow(request))
         assert client.post(request.url.path, content=request.content, headers=dict(signed.headers)).status_code == 200
         expected = main.app_state["businesses"]["saved-lead"].model_dump(mode="json")
     main.app_state["businesses"].clear()

@@ -1,3 +1,4 @@
+from common.security import agent_session_identity
 from common.security import ServiceAuth, mode, service_url
 from datetime import datetime
 import json
@@ -46,6 +47,7 @@ class SDRAgentExecutor(AgentExecutor):
         logger.info("SDRAgentExecutor initialized with ADK Runner and artifact service.")
 
     async def execute(self, context: RequestContext, event_queue: EventQueue):
+        owner_id_for_adk, scoped_session_id = agent_session_identity(context.context_id, context.task_id)
         task_updater = TaskUpdater(event_queue, context.task_id, context.context_id)
         
         logger.info("Received SDR request")
@@ -117,7 +119,7 @@ class SDRAgentExecutor(AgentExecutor):
         )
 
         # Session handling code
-        session_id_for_adk = context.context_id
+        session_id_for_adk = scoped_session_id
         logger.info(f"Task {context.task_id}: Using ADK session_id: '{session_id_for_adk}' for business: '{business_name}'")
 
         session: Session | None = None
@@ -125,7 +127,7 @@ class SDRAgentExecutor(AgentExecutor):
             try:
                 session = await self._adk_runner.session_service.get_session(
                     app_name=self._adk_runner.app_name,
-                    user_id="a2a_user",
+                    user_id=owner_id_for_adk,
                     session_id=session_id_for_adk,
                 )
             except Exception as e:
@@ -137,7 +139,7 @@ class SDRAgentExecutor(AgentExecutor):
                 try:
                     session = await self._adk_runner.session_service.create_session(
                         app_name=self._adk_runner.app_name,
-                        user_id="a2a_user",
+                        user_id=owner_id_for_adk,
                         session_id=session_id_for_adk,
                         state={
                             "business_data": business_data,
@@ -236,7 +238,7 @@ class SDRAgentExecutor(AgentExecutor):
             phone_call_result = None
             
             async for event in self._adk_runner.run_async(
-                user_id="a2a_user",
+                user_id=owner_id_for_adk,
                 session_id=session_id_for_adk,
                 new_message=adk_content,
             ):
@@ -316,7 +318,7 @@ class SDRAgentExecutor(AgentExecutor):
                                 # Update session to reflect tool completion
                                 await self._adk_runner.session_service.update_session(
                                     app_name=self._adk_runner.app_name,
-                                    user_id="a2a_user", 
+                                    user_id=owner_id_for_adk,
                                     session_id=session_id_for_adk,
                                     state=session.state
                                 )
