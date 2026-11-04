@@ -80,7 +80,8 @@ async def test_owned_http_views_callbacks_reset_and_persistence(monkeypatch, tmp
         assert owner in {A, B}
         token = enter(owner, headers.get(b'x-test-campaign',b'').decode() or None)
         try:
-            await test_app(scope, receive, send)
+            async with main.pipeline_scope():
+                await test_app(scope, receive, send)
         finally:
             execution.reset(token)
     for owner, name in ((A,'Private A'),(B,'Private B')):
@@ -88,6 +89,7 @@ async def test_owned_http_views_callbacks_reset_and_persistence(monkeypatch, tmp
         try:
             main.app_state.update(session_id='same-campaign', current_city=name,
                 businesses={'same-id':main.Business(id='same-id',name=name,city=name)})
+            store.save(owner, main.pipeline_snapshot())
         finally:
             execution.reset(token)
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=verified_app),base_url='http://test') as client:

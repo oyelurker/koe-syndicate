@@ -1,6 +1,6 @@
 # P1 verification checkpoint — 4 November 2026
 
-Items 11–14 are complete for the restricted local scope. The durable-storage foundation was merged through PR #20; see `P1-STORAGE.md`. Hosted CI and main's merge protection are verified, including the deliberate failure and recovery proof recorded below. Isolation, job execution, outreach policies and integrations remain pending in items 15–22. Cloud services stay IAM-contained and live actions stay disabled.
+Items 11–15 are complete for the restricted local/shared-database scope. See `P1-CONCURRENCY.md` for item 15, its multi-process evidence and its deployment limits. The durable-storage foundation was merged through PR #20; see `P1-STORAGE.md`. Hosted CI and main's merge protection are verified, including the deliberate failure and recovery proof recorded below. Durable job execution, outreach policies, integrations and cloud deployment remain pending in items 16–22. Cloud services stay IAM-contained and live actions stay disabled.
 
 ## Backend baseline — item 11 complete
 
@@ -41,6 +41,6 @@ Item 13 is complete. `p1-hosted-ci.json` contains the run/job evidence and polic
 
 ## Commit and next step
 
-The owner retains control of commits. This branch changes only verification documentation and evidence; the two earlier commit-file manifests are historical and should not be reused. The next implementation is item 15: owner/campaign-scoped runtime state, sockets, callbacks and agent session identities, with stale-run rejection. The existing single-owner restriction stays in place while that work is validated. Item 16 then addresses durable dispatch, cancellation, retries and idempotency.
+The owner retains control of commits. This branch changes only verification documentation and evidence; the two earlier commit-file manifests are historical and should not be reused. The next implementation is item 16: durable dispatch, cancellation, bounded retries, idempotency and reconciliation. Keep the existing single-owner restriction and disabled live actions until all applicable execution and deployment gates are satisfied.
 
 The configuration follows the official [GitHub Actions Python guide](https://docs.github.com/en/actions/tutorials/build-and-test-code/python) and [Dependabot options reference](https://docs.github.com/en/code-security/reference/supply-chain-security/dependabot-options-reference). Frontend changes follow the installed Next.js 16.4.3 documentation for client components, Link, Image and fonts.

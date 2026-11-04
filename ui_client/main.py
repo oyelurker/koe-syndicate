@@ -12,7 +12,7 @@ import logging
 import os
 import sys
 import uuid
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from datetime import datetime
@@ -151,12 +151,14 @@ class LeadFinderRequest(BaseModel):
     niche: Optional[str] = Field(None, description="Target business niche or type")
 
 class HumanInputRequest(BaseModel):
+    campaign_id: str | None = None
     request_id: str
     prompt: str
     type: str
     timestamp: str
 
 class HumanInputResponse(BaseModel):
+    campaign_id: str = Field(..., min_length=1, max_length=128)
     request_id: str
     response: str
 
@@ -174,18 +176,19 @@ def empty_pipeline_state():
     }
 
 
-from .runtime import OwnerRuntime, runtime_owner
+from .runtime import OwnerRuntime, runtime_owner, PipelineRuntimeMiddleware
 
 app_state = OwnerRuntime(empty_pipeline_state)
 
 # Session Signer
 from common.security import ServiceAuth, SecurityError, require_action, mode, campaign_context
 from .security import BrowserSecurityMiddleware, validate_config
-from .store import Store
+from .store import Store, StoreConflict
 from . import db as token_db
 from common.security import Execution, execution, owner_email
 
 pipeline_store: Store | None = None
+runtime_worker_id: str | None = None
 
 
 def pipeline_snapshot():
@@ -204,12 +207,15 @@ def restore_pipeline(snapshot):
     app_state.update(snapshot)
     app_state["businesses"] = {key: Business.model_validate(value) for key, value in snapshot.get("businesses", {}).items()}
     app_state["agent_updates"] = [AgentUpdate.model_validate(value) for value in snapshot.get("agent_updates", [])]
-    app_state["human_input_requests"] = {key: HumanInputRequest.model_validate(value) for key, value in snapshot.get("human_input_requests", {}).items()}
+    app_state["human_input_requests"] = {key: HumanInputRequest.model_validate(value)
+        for key, value in snapshot.get("human_input_requests", {}).items()
+        if snapshot.get("session_id") and value.get("campaign_id") == snapshot["session_id"]}
 
 
 def campaign_is_current(campaign_id):
     context = execution.get()
-    return bool(context and campaign_id and app_state["session_id"] == campaign_id)
+    view = app_state.current_view() if context else None
+    return bool(context and not (view and view.conflicted) and campaign_id and app_state["session_id"] == campaign_id)
 
 
 def require_current_campaign():
@@ -218,22 +224,63 @@ def require_current_campaign():
         raise SecurityError("Campaign is missing, reset or superseded")
 
 
+@asynccontextmanager
+async def pipeline_scope():
+    if pipeline_store is None:
+        raise RuntimeError("Persistent storage has not completed application startup")
+    committed = await asyncio.to_thread(pipeline_store.read_view, runtime_owner())
+    token = app_state.bind(committed["revision"])
+    try:
+        if committed["snapshot"]:
+            restore_pipeline(committed["snapshot"])
+        view = app_state.current_view()
+        view.cursor = committed["cursor"]
+        view.baseline = pipeline_snapshot()
+        yield view
+    finally:
+        view = app_state.current_view()
+        if view.baseline is not None and pipeline_snapshot() == view.baseline:
+            app_state.cache_current()
+        app_state.unbind(token)
+
+
 async def persist_pipeline(event):
     context = execution.get()
     if context is None:
         raise SecurityError("Missing owner for persistent pipeline update")
+    view = app_state.current_view()
+    if view is None or view.conflicted:
+        raise StoreConflict("A fresh pipeline view is required")
     if context.campaign_id:
         require_current_campaign()
     if pipeline_store is None:
         raise RuntimeError("Persistent storage has not completed application startup")
-    await asyncio.to_thread(pipeline_store.save, context.owner, pipeline_snapshot(), json.loads(json.dumps(event, default=str)))
+    snapshot = pipeline_snapshot()
+    try:
+        result = await asyncio.to_thread(pipeline_store.save, context.owner, snapshot,
+            json.loads(json.dumps(event, default=str)), expected_revision=view.revision, worker_id=runtime_worker_id)
+    except StoreConflict:
+        # Discard this operation's speculative state and stop its later callbacks/finalizers.
+        view.conflicted = True
+        raise
+    view.revision = result["revision"]
+    view.baseline = snapshot
+    return result
+
+
+async def flush_pipeline():
+    view = app_state.current_view()
+    if view and not view.conflicted and pipeline_snapshot() != view.baseline:
+        await persist_pipeline({"type": "state_changed"})
+
 
 class ConnectionManager:
     """Manages WebSocket connections for real-time updates."""
     
-    def __init__(self, persist=None):
+    def __init__(self, persist=None, durable_delivery=False):
         self.active_connections: dict[WebSocket, str] = {}
         self.persist = persist
+        self.durable_delivery = durable_delivery
     
     async def connect(self, websocket: WebSocket):
         owner = runtime_owner()
@@ -248,12 +295,17 @@ class ConnectionManager:
     async def send_update(self, data: dict[str, Any]):
         """Persist and publish only within the verified owner's current view."""
         owner = runtime_owner()
+        if self.durable_delivery and app_state.current_view() is None:
+            async with pipeline_scope():
+                return await self.send_update(data)
         context = execution.get()
         campaign = context.campaign_id or app_state["session_id"]
         if context.campaign_id:
             require_current_campaign()
         if self.persist is not None:
             await self.persist(data)
+        if self.durable_delivery:
+            return
         envelope = {**data, "campaign_id": campaign}
         message = json.dumps(envelope, default=str)
         # Snapshot membership: a disconnect/connect may happen while sending.
@@ -271,27 +323,30 @@ class ConnectionManager:
                 logger.warning("WebSocket delivery failed; disconnecting client")
                 self.disconnect(connection)
 
-manager = ConnectionManager(persist=persist_pipeline)
+manager = ConnectionManager(persist=persist_pipeline, durable_delivery=True)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Handles application startup and shutdown events."""
-    global pipeline_store
+    global pipeline_store, runtime_worker_id
     validate_config()
     logger.info("UI Client starting up...")
     
     # Initialize SQLite database
     await db.init_db()
     store = Store(token_db.DB_PATH)
+    runtime_worker_id = str(uuid.uuid4())
+    await asyncio.to_thread(store.heartbeat, runtime_worker_id)
     token = execution.set(Execution(owner_email(), mode()))
     try:
         app_state.clear_all()
         manager.active_connections.clear()
         app_state.update(empty_pipeline_state())
         await asyncio.to_thread(store.interrupt_incomplete, owner_email())
-        restored = await asyncio.to_thread(store.load, owner_email())
-        if restored:
-            restore_pipeline(restored)
+        restored = await asyncio.to_thread(store.read_view, owner_email())
+        if restored["snapshot"]:
+            restore_pipeline(restored["snapshot"])
+        app_state._revisions[runtime_owner()] = restored["revision"]
         pipeline_store = store
         logger.info("Database initialized successfully.")
 
@@ -310,18 +365,45 @@ async def lifespan(app: FastAPI):
                 logger.warning(f"[RAPIDS] Startup scoring failed: {_e}")
         elif not RAPIDS_SCORING_AVAILABLE:
             logger.warning("[RAPIDS] Scoring engine not loaded — /api/lead-scores will return empty.")
+        if pipeline_snapshot() != (restored["snapshot"] or empty_pipeline_state()) and app_state["lead_scores"]:
+            try:
+                initialized = await asyncio.to_thread(store.save, owner_email(), pipeline_snapshot(),
+                    {"type": "scores_initialized"}, expected_revision=restored["revision"], worker_id=runtime_worker_id)
+                app_state._revisions[runtime_owner()] = initialized["revision"]
+            except StoreConflict:
+                latest = await asyncio.to_thread(store.read_view, owner_email())
+                app_state.clear()
+                app_state.update(empty_pipeline_state())
+                if latest["snapshot"]:
+                    restore_pipeline(latest["snapshot"])
+
     finally:
         execution.reset(token)
 
+    async def renew_worker():
+        while True:
+            await asyncio.sleep(20)
+            try:
+                await asyncio.to_thread(store.heartbeat, runtime_worker_id)
+                await asyncio.to_thread(store.interrupt_incomplete, owner_email())
+            except Exception:
+                logger.error("Worker lease renewal failed; expired leases deny further writes")
+    heartbeat_task = asyncio.create_task(renew_worker())
     try:
         yield
     finally:
+        heartbeat_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await heartbeat_task
+        await asyncio.to_thread(store.release_worker, runtime_worker_id)
+        runtime_worker_id = None
         pipeline_store = None
         app_state.clear_all()
         manager.active_connections.clear()
         logger.info("UI Client shutting down...")
 
 app = FastAPI(lifespan=lifespan, debug=False, docs_url=None, redoc_url=None, openapi_url=None)
+app.add_middleware(PipelineRuntimeMiddleware, scope_factory=pipeline_scope, flush=flush_pipeline)
 app.add_middleware(BrowserSecurityMiddleware)
 
 # Add CORS Middleware to allow requests from the frontend with cookies
@@ -994,8 +1076,14 @@ async def call_lead_manager_agent(query: str, session_id: str) -> dict[str, Any]
 async def run_lead_finding_process(city: str, session_id: str, niche: str = ""):
     token = execution.set(campaign_context(session_id))
     try:
-        if campaign_is_current(session_id):
+        if pipeline_store is not None:
+            async with pipeline_scope():
+                if campaign_is_current(session_id):
+                    await _run_lead_finding_process(city, session_id, niche)
+        elif campaign_is_current(session_id):
             await _run_lead_finding_process(city, session_id, niche)
+    except StoreConflict:
+        logger.info("Discarded obsolete discovery result after a competing commit")
     finally:
         execution.reset(token)
 
@@ -1047,6 +1135,8 @@ async def _run_lead_finding_process(city: str, session_id: str, niche: str = "")
                         },
                         "timestamp": datetime.now().isoformat(),
                     })
+                except StoreConflict:
+                    raise
                 except Exception as e:
                     business_logger.error(f"Error processing business lead: {e}")
 
@@ -1076,6 +1166,8 @@ async def _run_lead_finding_process(city: str, session_id: str, niche: str = "")
                 "timestamp": datetime.now().isoformat(),
             })
     
+    except StoreConflict:
+        raise
     except Exception as e:
         if not campaign_is_current(session_id):
             return
@@ -1095,24 +1187,49 @@ async def _run_lead_finding_process(city: str, session_id: str, niche: str = "")
                 "timestamp": datetime.now().isoformat(),
             })
 
-# WebSocket endpoint for real-time updates
+def socket_snapshot(snapshot, revision):
+    snapshot = snapshot or empty_pipeline_state()
+    return {"type": "initial_state", "campaign_id": snapshot.get("session_id"), "revision": revision,
+            "businesses": list(snapshot.get("businesses", {}).values()),
+            "current_city": snapshot.get("current_city"), "is_running": snapshot.get("is_running", False)}
+
+
+async def deliver_socket_events(websocket, cursor, revision):
+    """Consume a bounded committed owner outbox; works across local UI workers."""
+    batch = await asyncio.to_thread(pipeline_store.read_view, runtime_owner(), cursor)
+    campaign = (batch["snapshot"] or {}).get("session_id")
+    for event in batch["events"]:
+        if event["campaign_id"] == campaign:
+            await websocket.send_text(json.dumps({**event["payload"], "event_id": event["id"]}, default=str))
+        cursor = event["id"]
+    if cursor >= batch["cursor"] and revision != batch["revision"]:
+        await websocket.send_text(json.dumps(socket_snapshot(batch["snapshot"], batch["revision"]), default=str))
+        revision = batch["revision"]
+    return cursor, revision
+
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await manager.connect(websocket)
     try:
-        # Send current state to newly connected client
-        await websocket.send_text(json.dumps({
-            "type": "initial_state",
-            "campaign_id": app_state["session_id"],
-            "businesses": [business.model_dump() for business in app_state["businesses"].values()],
-            "current_city": app_state["current_city"],
-            "is_running": app_state["is_running"],
-        }, default=str))
-        
-        # Keep connection alive
+        view = app_state.current_view()
+        cursor, revision = view.cursor, view.revision
+        await websocket.send_text(json.dumps(socket_snapshot(pipeline_snapshot(), revision), default=str))
         while True:
-            await websocket.receive_text()
+            try:
+                await asyncio.wait_for(websocket.receive_text(), timeout=0.5)
+            except asyncio.TimeoutError:
+                pass
+            # Validate even during quiet periods, including a logout on another worker.
+            from .security import session_user
+            _, user = await session_user(websocket.scope)
+            if user is None:
+                await websocket.close(code=1008)
+                return
+            cursor, revision = await deliver_socket_events(websocket, cursor, revision)
     except WebSocketDisconnect:
+        pass
+    finally:
         manager.disconnect(websocket)
 
 # Agent callback endpoint
@@ -1303,6 +1420,8 @@ async def start_lead_finding(city: str = Form(...), niche: str = Form(None)):
             status_code=400,
             content={"error": f"Invalid input: {e}"}
         )
+    except StoreConflict:
+        raise
     except Exception as e:
         logger.error(f"Error starting lead finding: {e}", exc_info=True)
         app_state["is_running"] = False
@@ -1390,6 +1509,8 @@ async def send_business_to_sdr(
                 content={"error": result["error"]}
             )
             
+    except StoreConflict:
+        raise
     except Exception as e:
         logger.error(f"Error sending business to SDR: {e}", exc_info=True)
         return JSONResponse(
@@ -1521,6 +1642,8 @@ async def trigger_lead_manager():
                 content={"error": result["error"]}
             )
             
+    except StoreConflict:
+        raise
     except Exception as e:
         logger.error(f"Error triggering Lead Manager agent: {e}", exc_info=True)
         
@@ -1548,7 +1671,11 @@ async def receive_human_input_request(request: HumanInputRequest):
     except SecurityError:
         return JSONResponse({"error": "Campaign is missing, reset or superseded"}, status_code=409)
 
-    # Store the request
+    campaign = execution.get().campaign_id
+    if request.campaign_id is not None and request.campaign_id != campaign:
+        return JSONResponse({"error": "Request campaign does not match signer"}, status_code=409)
+    request = request.model_copy(update={"campaign_id": campaign})
+    # Store only the provenance verified from the service signature.
     app_state["human_input_requests"][request.request_id] = request
     
     # Send notification to all connected WebSocket clients
@@ -1571,7 +1698,7 @@ async def receive_human_input_request(request: HumanInputRequest):
 async def get_pending_human_input_requests():
     """Get all pending human input requests."""
     return {
-        "requests": [req.dict() for req in app_state["human_input_requests"].values()],
+        "requests": [req.model_dump() for req in app_state["human_input_requests"].values()],
         "count": len(app_state["human_input_requests"])
     }
 
@@ -1587,7 +1714,10 @@ async def submit_human_input_response(request_id: str, response: HumanInputRespo
     # Get the request first (but don't remove it yet)
     original_request = app_state["human_input_requests"].get(request_id)
     session_id = app_state["session_id"]
-    
+    if (response.request_id != request_id or response.campaign_id != session_id
+            or original_request.campaign_id != session_id):
+        return JSONResponse({"error": "Approval does not belong to the active campaign"}, status_code=409)
+
     logger.info("Human input response submitted for %s", request_id)
     
     # Try to notify the human creation tool via HTTP callback to SDR agent
@@ -1614,9 +1744,10 @@ async def submit_human_input_response(request_id: str, response: HumanInputRespo
     if not campaign_is_current(session_id):
         return JSONResponse({"error": "Campaign was reset or superseded"}, status_code=409)
 
-    # Only remove the request from UI state AFTER successful processing
-    if success:
-        app_state["human_input_requests"].pop(request_id, None)
+    if not success:
+        return JSONResponse({"error": "Approval delivery failed; request remains pending"}, status_code=503)
+    # Only remove the request after successful processing by the matching agent.
+    app_state["human_input_requests"].pop(request_id, None)
     
     # Send WebSocket notification that response was submitted
     await manager.send_update({

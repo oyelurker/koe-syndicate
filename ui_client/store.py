@@ -5,9 +5,15 @@ import hashlib
 import json
 from pathlib import Path
 import sqlite3
+import time
 import uuid
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+
+
+class StoreConflict(ValueError):
+    """The caller must reload; a newer committed view must never be overwritten."""
+    pass
 
 
 def tenant_id(owner):
@@ -40,8 +46,15 @@ class Store:
             if version == SCHEMA_VERSION:
                 return
             connection.execute("PRAGMA journal_mode=WAL")
-            connection.executescript("""
-                BEGIN IMMEDIATE;
+            connection.execute("BEGIN IMMEDIATE")
+            # Re-read after acquiring the writer lock: another process may migrate.
+            version = connection.execute("PRAGMA user_version").fetchone()[0]
+            if version == SCHEMA_VERSION:
+                return
+            if version == 1:
+                self._migrate_v2(connection)
+                return
+            schema = """
                 CREATE TABLE IF NOT EXISTS tenants (
                     id TEXT PRIMARY KEY, owner_email TEXT NOT NULL UNIQUE,
                     created_at TEXT NOT NULL
@@ -82,7 +95,10 @@ class Store:
                     tenant_id TEXT PRIMARY KEY REFERENCES tenants(id),
                     data TEXT NOT NULL, updated_at TEXT NOT NULL
                 );
-            """)
+            """
+            for statement in schema.split(";"):
+                if statement.strip():
+                    connection.execute(statement)
             # Existing users retain their encrypted credentials and gain a tenant.
             if connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='users'").fetchone():
                 # Case-colliding legacy profiles require review; never merge them silently.
@@ -91,7 +107,43 @@ class Store:
                     identity = self._tenant(connection, user["email"])
                     connection.execute("INSERT OR IGNORE INTO integration_connections VALUES (?, 'google', ?, 1, 1, ?)",
                                        (identity, user["id"], now()))
-            connection.execute("PRAGMA user_version=1")
+            self._migrate_v2(connection)
+
+    def _migrate_v2(self, connection):
+        connection.execute("ALTER TABLE pipeline_snapshots ADD COLUMN revision INTEGER NOT NULL DEFAULT 1")
+        connection.execute("ALTER TABLE jobs ADD COLUMN worker_id TEXT")
+        connection.execute("CREATE TABLE IF NOT EXISTS runtime_workers (id TEXT PRIMARY KEY, expires_at REAL NOT NULL)")
+        connection.execute("PRAGMA user_version=2")
+
+    def heartbeat(self, worker_id):
+        with self.connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            existing = connection.execute("SELECT expires_at FROM runtime_workers WHERE id=?", (worker_id,)).fetchone()
+            if existing and existing[0] <= time.time():
+                raise StoreConflict("Worker lease expired; restart this worker before renewing")
+            connection.execute("INSERT INTO runtime_workers VALUES (?,?) ON CONFLICT(id) DO UPDATE SET expires_at=excluded.expires_at",
+                               (worker_id, time.time() + 90))
+
+    def release_worker(self, worker_id):
+        with self.connection() as connection:
+            connection.execute("UPDATE runtime_workers SET expires_at=0 WHERE id=?", (worker_id,))
+
+    def read_view(self, owner, after=None, limit=200):
+        """Read a consistent owner snapshot, revision and bounded committed outbox."""
+        identity = tenant_id(owner)
+        if not isinstance(limit, int) or not 1 <= limit <= 500:
+            raise ValueError("Invalid event batch size")
+        with self.connection() as connection:
+            connection.execute("BEGIN")
+            row = connection.execute("SELECT data,revision FROM pipeline_snapshots WHERE tenant_id=?", (identity,)).fetchone()
+            cursor = connection.execute("SELECT COALESCE(MAX(id),0) FROM events WHERE tenant_id=?", (identity,)).fetchone()[0]
+            events = []
+            if after is not None:
+                events = [{"id": r[0], "campaign_id": r[1], "payload": json.loads(r[2])} for r in connection.execute(
+                    "SELECT id,campaign_id,payload FROM events WHERE tenant_id=? AND id>? AND id<=? ORDER BY id LIMIT ?",
+                    (identity, after, cursor, limit))]
+        return {"snapshot": json.loads(row[0]) if row else None, "revision": row[1] if row else 0,
+                "cursor": cursor, "events": events}
 
     def check_version(self):
         if self.path.exists():
@@ -110,13 +162,23 @@ class Store:
             row = connection.execute("SELECT data FROM pipeline_snapshots WHERE tenant_id=?", (identity,)).fetchone()
         return json.loads(row[0]) if row else None
 
-    def save(self, owner, snapshot, event=None):
+    def save(self, owner, snapshot, event=None, *, expected_revision=0, worker_id=None):
         # Serialize before beginning a transaction; invalid payloads change nothing.
+        if type(expected_revision) is not int or expected_revision < 0:
+            raise ValueError("An explicit nonnegative revision is required")
         encoded = json.dumps(snapshot, allow_nan=False)
         event_json = json.dumps(event, allow_nan=False) if event else None
         with self.connection() as connection:
             connection.execute("BEGIN IMMEDIATE")
+            identity = tenant_id(owner)
+            row = connection.execute("SELECT revision FROM pipeline_snapshots WHERE tenant_id=?", (identity,)).fetchone()
+            if worker_id and not connection.execute("SELECT 1 FROM runtime_workers WHERE id=? AND expires_at>?", (worker_id, time.time())).fetchone():
+                raise StoreConflict("Worker lease expired; restart this worker before writing")
+            actual_revision = row[0] if row else 0
+            if actual_revision != expected_revision:
+                raise StoreConflict("Pipeline changed; reload and retry the operation")
             identity = self._tenant(connection, owner)
+            revision = actual_revision + 1
             campaign = snapshot.get("session_id")
             timestamp = now()
             if campaign:
@@ -128,33 +190,48 @@ class Store:
                 connection.execute("""INSERT INTO leads VALUES (?,?,?,?,?)
                     ON CONFLICT(tenant_id,id) DO UPDATE SET campaign_id=excluded.campaign_id,data=excluded.data,updated_at=excluded.updated_at""",
                     (identity, lead_id, campaign, json.dumps(data, allow_nan=False), timestamp))
-            connection.execute("""INSERT INTO pipeline_snapshots VALUES (?,?,?)
-                ON CONFLICT(tenant_id) DO UPDATE SET data=excluded.data,updated_at=excluded.updated_at""", (identity, encoded, timestamp))
+            connection.execute("""INSERT INTO pipeline_snapshots(tenant_id,data,updated_at,revision) VALUES (?,?,?,?)
+                ON CONFLICT(tenant_id) DO UPDATE SET data=excluded.data,updated_at=excluded.updated_at,revision=excluded.revision""",
+                (identity, encoded, timestamp, revision))
+            event_id = None
             if event:
                 kind = event.get("type", "update")
+                event_json = json.dumps({**event, "campaign_id": campaign, "revision": revision}, allow_nan=False)
                 connection.execute("INSERT INTO events(tenant_id,campaign_id,kind,payload,created_at) VALUES (?,?,?,?,?)",
                                    (identity, campaign, kind, event_json, timestamp))
+                event_id = connection.execute("SELECT last_insert_rowid()").fetchone()[0]
                 if campaign and kind == "process_started":
-                    connection.execute("INSERT INTO jobs VALUES (?,?,?,?,?,?,?,?,?,?)",
-                        (identity, "discovery:" + campaign, campaign, "lead_discovery", "running", event_json, None, None, timestamp, timestamp))
+                    connection.execute("INSERT INTO jobs VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                        (identity, "discovery:" + campaign, campaign, "lead_discovery", "running", event_json, None, None, timestamp, timestamp, worker_id))
                 if campaign and kind in {"lead_finding_completed", "lead_finding_failed"}:
                     state = "completed" if kind == "lead_finding_completed" else "failed"
                     connection.execute("UPDATE jobs SET state=?,updated_at=? WHERE tenant_id=? AND id=?",
                                        (state, timestamp, identity, "discovery:" + campaign))
 
+        return {"revision": revision, "event_id": event_id}
+
     def interrupt_incomplete(self, owner):
         """Mark lost in-process work accurately; never replay provider actions on restart."""
         identity = tenant_id(owner)
         with self.connection() as connection:
-            connection.execute("UPDATE jobs SET state='interrupted',updated_at=? WHERE tenant_id=? AND state IN ('queued','running')",
-                               (now(), identity))
-            row = connection.execute("SELECT data FROM pipeline_snapshots WHERE tenant_id=?", (identity,)).fetchone()
+            connection.execute("BEGIN IMMEDIATE")
+            connection.execute("UPDATE jobs SET state='interrupted',updated_at=? WHERE tenant_id=? AND state IN ('queued','running') AND (worker_id IS NULL OR NOT EXISTS (SELECT 1 FROM runtime_workers WHERE id=jobs.worker_id AND expires_at>?))",
+                               (now(), identity, time.time()))
+            row = connection.execute("SELECT data,revision FROM pipeline_snapshots WHERE tenant_id=?", (identity,)).fetchone()
             if row:
                 snapshot = json.loads(row[0])
-                snapshot["is_running"] = False
-                connection.execute("UPDATE pipeline_snapshots SET data=?,updated_at=? WHERE tenant_id=?",
-                                   (json.dumps(snapshot), now(), identity))
-            connection.execute("UPDATE campaigns SET state='interrupted',updated_at=? WHERE tenant_id=? AND state='running'", (now(), identity))
+                campaign = snapshot.get("session_id")
+                interrupted = connection.execute("SELECT 1 FROM jobs WHERE tenant_id=? AND id=? AND state='interrupted'",
+                    (identity, "discovery:" + str(campaign))).fetchone()
+                if snapshot.get("is_running") and interrupted:
+                    snapshot["is_running"] = False
+                    revision = row[1] + 1
+                    connection.execute("UPDATE pipeline_snapshots SET data=?,updated_at=?,revision=? WHERE tenant_id=?",
+                                       (json.dumps(snapshot), now(), revision, identity))
+                    payload = {"type": "process_finished", "status": "interrupted", "campaign_id": campaign, "revision": revision}
+                    connection.execute("INSERT INTO events(tenant_id,campaign_id,kind,payload,created_at) VALUES (?,?,?,?,?)",
+                        (identity, campaign, "process_finished", json.dumps(payload), now()))
+            connection.execute("UPDATE campaigns SET state='interrupted',updated_at=? WHERE tenant_id=? AND state='running' AND EXISTS (SELECT 1 FROM jobs WHERE jobs.tenant_id=campaigns.tenant_id AND jobs.campaign_id=campaigns.id AND jobs.state='interrupted')", (now(), identity))
 
     def leads(self, owner):
         with self.connection() as connection:
@@ -183,8 +260,8 @@ class Store:
                     raise ValueError("Integration is disconnected")
                 generation = row[0]
             timestamp = now()
-            connection.execute("INSERT INTO jobs VALUES (?,?,?,?,?,?,?,?,?,?)",
-                (identity, job_id, campaign_id, kind, "queued", encoded, provider, generation, timestamp, timestamp))
+            connection.execute("INSERT INTO jobs VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                (identity, job_id, campaign_id, kind, "queued", encoded, provider, generation, timestamp, timestamp, None))
         return job_id
 
     def job_connection_valid(self, owner, job_id):

@@ -183,6 +183,7 @@ def test_signed_callback_works_once_and_cannot_spoof_agent(client):
                "data": {"name": "Fixture", "city": "Test"}}
     import ui_client.main as main
     main.app_state["session_id"] = "fixture-campaign"
+    main.pipeline_store.save("owner@example.test", main.pipeline_snapshot())
     req = signed_request(body=payload, campaign="fixture-campaign")
     assert client.post("/agent_callback", content=req.content, headers=dict(req.headers)).status_code == 200
     assert client.post("/agent_callback", content=req.content, headers=dict(req.headers)).status_code == 401

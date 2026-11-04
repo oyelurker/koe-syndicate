@@ -24,14 +24,23 @@ import httpx
 from google.oauth2.credentials import Credentials
 from common.security import Execution, ServiceAuth, execution
 from ui_client import db, security
+from ui_client.store import Store
+from ui_client.main import pipeline_snapshot
 from a2a.types import Task, TaskStatus, TaskState, SendMessageResponse, SendMessageSuccessResponse, JSONRPCError, JSONRPCErrorResponse
 
 from ui_client.main import app, app_state, manager, ConnectionManager, Business, BusinessStatus, AgentType, AgentUpdate
 
 
+def persist_fixture_state():
+    store = Store(db.DB_PATH)
+    revision = store.read_view("owner@example.test")["revision"]
+    store.save("owner@example.test", pipeline_snapshot(), expected_revision=revision)
+
+
 def signed_callback(client, payload):
     request = httpx.Request("POST", "http://localhost:8000/agent_callback", json=payload)
     app_state["session_id"] = app_state["session_id"] or "fixture-campaign"
+    persist_fixture_state()
     signed = next(ServiceAuth("sdr", "ui-client", Execution("owner@example.test", "demo", app_state["session_id"])).auth_flow(request))
     return client.post(request.url.path, content=request.content, headers=dict(signed.headers))
 
@@ -103,6 +112,7 @@ class TestUIClient:
     def test_start_lead_finding_already_running(self, client, reset_app_state):
         """Test starting lead finding when already running."""
         app_state["is_running"] = True
+        persist_fixture_state()
         response = client.post("/start_lead_finding", data={"city": "Boston"})
         assert response.status_code == 400
         data = response.json()
@@ -159,6 +169,7 @@ class TestUIClient:
     
     def test_api_businesses_empty(self, client, reset_app_state):
         """Test businesses API endpoint with no businesses."""
+        persist_fixture_state()
         response = client.get("/api/businesses")
         assert response.status_code == 200
         data = response.json()
@@ -174,6 +185,7 @@ class TestUIClient:
         )
         app_state["businesses"][test_business.id] = test_business
         
+        persist_fixture_state()
         response = client.get("/api/businesses")
         assert response.status_code == 200
         data = response.json()
@@ -187,6 +199,7 @@ class TestUIClient:
         app_state["is_running"] = True
         app_state["session_id"] = "test-session-123"
         
+        persist_fixture_state()
         response = client.get("/api/status")
         assert response.status_code == 200
         data = response.json()

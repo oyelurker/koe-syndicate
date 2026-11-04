@@ -24,3 +24,5 @@ Validation: the combined offline suite passes **115 tests** (107 existing plus e
 - Frontend event recovery/reconnect and campaign-aware stale-event handling (item 23).
 
 Keep single-owner access and live actions disabled. No cloud revision or provider action was executed for this checkpoint.
+
+Follow-up: `P1-CONCURRENCY.md` completes local shared-database ordering and event delivery with isolated authoritative views, revision checks, worker leases and real two-process verification. This document records the earlier process-local checkpoint; independent cloud replicas remain unsupported under item 22.

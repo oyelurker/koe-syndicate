@@ -33,6 +33,7 @@ def test_campaign_header_cannot_be_changed_or_removed():
 def test_callback_without_current_signed_campaign_changes_nothing(campaign):
     with TestClient(main.app, base_url='http://localhost:8000') as client:
         main.app_state['session_id'] = 'current-campaign'
+        main.pipeline_store.save(OWNER, main.pipeline_snapshot())
         payload = {'agent_type':'sdr', 'business_id':'late', 'status':'engaged', 'message':'Late update',
                    'data':{'name':'Wrong campaign lead', 'city':'Test'}}
         request = signed('/agent_callback', campaign, payload)
@@ -46,12 +47,14 @@ def test_callback_without_current_signed_campaign_changes_nothing(campaign):
 def test_current_callback_then_reset_rejects_freshly_signed_old_work():
     with TestClient(main.app, base_url='http://localhost:8000') as client:
         main.app_state['session_id'] = 'campaign-a'
+        main.pipeline_store.save(OWNER, main.pipeline_snapshot())
         payload = {'agent_type':'sdr', 'business_id':'lead', 'status':'engaged', 'message':'Current',
                    'data':{'name':'Fixture', 'city':'Test'}}
         first = signed('/agent_callback', 'campaign-a', payload)
         assert client.post(first.url.path, content=first.content, headers=dict(first.headers)).status_code == 200
         assert main.pipeline_store.load(OWNER)['businesses']['lead']['name'] == 'Fixture'
         main.app_state.update(main.empty_pipeline_state())
+        main.pipeline_store.save(OWNER, main.pipeline_snapshot(), expected_revision=main.pipeline_store.read_view(OWNER)["revision"])
         late = signed('/agent_callback', 'campaign-a', payload)
         assert client.post(late.url.path, content=late.content, headers=dict(late.headers)).status_code == 409
         assert main.app_state['businesses'] == {}
@@ -60,6 +63,7 @@ def test_current_callback_then_reset_rejects_freshly_signed_old_work():
 def test_stale_human_request_is_not_persisted():
     with TestClient(main.app, base_url='http://localhost:8000') as client:
         main.app_state['session_id'] = 'new-campaign'
+        main.pipeline_store.save(OWNER, main.pipeline_snapshot())
         body = {'request_id':'old-request', 'prompt':'Fixture', 'type':'website', 'timestamp':'fixture'}
         request = signed('/api/human-input', 'old-campaign', body)
         assert client.post(request.url.path, content=request.content, headers=dict(request.headers)).status_code == 409
