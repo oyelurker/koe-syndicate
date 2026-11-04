@@ -1,11 +1,11 @@
-# P1 verification checkpoint — 1 November 2026
+# P1 verification checkpoint — 4 November 2026
 
-The first checkpoint implements items 11–12. Its hosted CI now passes, and main's merge protection is enabled. The next feature branch implements the local durable-storage foundation in item 14; see `P1-STORAGE.md`. The opt-in hosted failure probe for item 13 still needs the updated workflow published and exercised. Isolation, job execution, outreach policies and integrations remain pending in items 15–22. Cloud services stay IAM-contained and live actions stay disabled.
+Items 11–14 are complete for the restricted local scope. The durable-storage foundation was merged through PR #20; see `P1-STORAGE.md`. Hosted CI and main's merge protection are verified, including the deliberate failure and recovery proof recorded below. Isolation, job execution, outreach policies and integrations remain pending in items 15–22. Cloud services stay IAM-contained and live actions stay disabled.
 
 ## Backend baseline — item 11 complete
 
 - Before: 13 failures and 63 passes across the UI and P0 suites.
-- After: `python -m pytest -q` passes **80 tests**, including all 56 P0 cases. Four upstream Google SDK deprecation warnings remain; the application's deprecated Pydantic serialization was corrected.
+- At the baseline checkpoint, `python -m pytest -q` passed **80 tests**, including all 56 P0 cases. The merged storage suite now has **94 passing tests**. Four upstream Google SDK deprecation warnings remain; the application's deprecated Pydantic serialization was corrected.
 - The legacy UI tests now authenticate with real signed sessions, CSRF tokens and signed service requests. Redirect assertions explicitly disable following. Health assertions reflect the intentional removal of public pipeline state. Typed SDK responses distinguish successful empty results, failed tasks and JSON-RPC errors.
 - Shared fixtures use temporary databases, deterministic test identities and isolated pipeline state. External socket connections fail tests instead of reaching a provider. A regression test proves the network guard rejects a connection before opening it.
 - Twenty-eight historical provider/debug probes were moved to `scripts/manual_checks/`; several execute real work while being imported and are not automated tests. They remain available as historical references with an explicit README. The minimal test-container copy path was updated. No failing maintained test was skipped or suppressed.
@@ -14,7 +14,7 @@ The first checkpoint implements items 11–12. Its hosted CI now passes, and mai
 ## Frontend — item 12 complete
 
 - Before: four lint errors and 30 warnings.
-- After: lint passes with **zero errors and zero warnings**; standalone TypeScript checking and the production build pass. Local Node version: 26.3.0. The CI configuration selects Node 24; the hosted run remains pending.
+- After: lint passes with **zero errors and zero warnings**; standalone TypeScript checking and the production build pass. Local Node version: 26.3.0. Hosted CI also passes on Node 24.
 - The phone modal initializes its editable state in a keyed form, so switching prospects or reopening the modal resets the draft without an effect-driven render loop. Internal navigation uses Next Link. External OAuth navigation remains a full browser navigation to the backend.
 - Removed unused values and duplicate component font links. Fonts are supplied by the root layout through Next's font loader. Existing external images use explicit dimensions or bounded fill; they remain unoptimized to retain direct external delivery, including SVG logos.
 - Lint now treats warnings as failures by default. There are no new blanket rule suppressions.
@@ -31,10 +31,16 @@ Local evidence:
 - Commit `844bce6` passed every hosted job, including both Linux and Windows backends and the aggregate `required-checks`: [verified CI run](https://github.com/oyelurker/koe-syndicate/actions/runs/41275060918). `p1-hosted-ci.json` records the results and policy.
 - GitHub's API confirms main now requires an up-to-date `required-checks` result from the GitHub Actions app, PRs, admin enforcement and no force-push/deletion. No second reviewer is required. Future work belongs on feature branches and PRs.
 
-The remaining item 13 proof is an intentionally failed hosted test followed by a successful normal run. The updated workflow adds a manual-only `exercise_failure_gate` boolean, false by default. Locally executing its exact shell step creates a temporary failing pytest case and returns exit 1 as intended. After this workflow update is published, exercise that input once, verify the Linux test job and aggregate required check fail, then run normally and verify the gate returns green. Ordinary pushes/PRs never execute the intentional-failure step.
+On 4 November 2026, the manual-only `exercise_failure_gate` input was exercised against merged main commit `77879b37fc462d19a5a7a86e4e91d5d9d52bc2a9`:
+
+- [Intentional failure run](https://github.com/oyelurker/koe-syndicate/actions/runs/41778811893): the maintained Linux suite passed, then the opt-in test failed. The Linux job and aggregate `required-checks` failed; Windows, frontend, audits and secrets passed. This proves failure propagates to the required check. No failing project code was committed and no merge was attempted.
+- [Normal recovery run](https://github.com/oyelurker/koe-syndicate/actions/runs/41779206213): the same commit, with the probe disabled, passed all six jobs. Ordinary pushes and PRs never execute the intentional-failure step.
+- Main's protection was re-read from GitHub: strict/up-to-date `required-checks`, bound to GitHub Actions app 15368, PR requirement and admin enforcement remain enabled. Force pushes and deletion remain disabled.
+
+Item 13 is complete. `p1-hosted-ci.json` contains the run/job evidence and policy. Dependabot PRs remain open and unmerged. No cloud deployment or provider action was performed.
 
 ## Commit and next step
 
-The owner retains control of commits. `P1-COMMIT-FILES.txt` is the historical first-checkpoint manifest, already committed as `844bce6`. Use `P1-STORAGE-COMMIT-FILES.txt` for the new storage/CI-evidence feature branch. It excludes unrelated pitch/deck files and runtime artifacts. Push the feature branch and use a PR; main now rejects direct pushes.
+The owner retains control of commits. This branch changes only verification documentation and evidence; the two earlier commit-file manifests are historical and should not be reused. The next implementation is item 15: owner/campaign-scoped runtime state, sockets, callbacks and agent session identities, with stale-run rejection. The existing single-owner restriction stays in place while that work is validated. Item 16 then addresses durable dispatch, cancellation, retries and idempotency.
 
 The configuration follows the official [GitHub Actions Python guide](https://docs.github.com/en/actions/tutorials/build-and-test-code/python) and [Dependabot options reference](https://docs.github.com/en/code-security/reference/supply-chain-security/dependabot-options-reference). Frontend changes follow the installed Next.js 16.4.3 documentation for client components, Link, Image and fonts.

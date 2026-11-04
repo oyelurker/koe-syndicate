@@ -27,9 +27,9 @@ Phase gate: remain in restricted operation until Phase C establishes durable ten
 
 - [x] **11. Repair the backend test baseline.** Align tests with intended contracts, handle redirect assertions explicitly, fix pytest configuration and separate offline tests from provider integration scripts. Add regression tests for items 01–10. **Done when:** the offline suite passes without contacting providers and includes anonymous, cross-owner, CSRF, callback-auth and demo-write denial cases.
 - [x] **12. Clear frontend lint failures and actionable warnings.** Fix hook ordering/dependencies, navigation and other reported errors; review warnings rather than blanket-disabling rules. **Done when:** lint, type checking and production build pass; any deferred warnings are individually explained.
-- [ ] **13. Add continuous integration gates.** Run offline backend tests, frontend lint/build, dependency audits and secret scanning; add dependency update automation and document required checks. **Done when:** a real CI run passes and a deliberately failing test blocks the relevant check. Configure repository merge protection if repository permissions permit; otherwise record that separately.
+- [x] **13. Add continuous integration gates.** Run offline backend tests, frontend lint/build, dependency audits and secret scanning; add dependency update automation and document required checks. **Done when:** a real CI run passes and a deliberately failing test blocks the relevant check. Configure repository merge protection if repository permissions permit; otherwise record that separately.
 
-**Checkpoint, 1 November 2026:** items 11–12 were committed as `844bce6`; hosted CI passed both backend runners, frontend, audits, secrets and the aggregate gate. Main now requires an app-bound GitHub Actions check and PRs, including for admins. Item 13 remains open only for the deliberate hosted failure/recovery proof; its manual opt-in workflow probe is locally validated and awaits publication. See `P1-VERIFICATION.md` and `p1-hosted-ci.json`.
+**Checkpoint, 4 November 2026:** items 11–14 are verified within their documented local scope. Storage PR #20 is merged. Item 13 is complete: the manual hosted failure probe made the Linux and aggregate required checks fail, then a normal run of the same main commit passed all six jobs. Main's app-bound check, up-to-date requirement, PR requirement and admin enforcement were reverified. See `P1-VERIFICATION.md` and `p1-hosted-ci.json`.
 
 ## Phase C — P1: establish ownership, durability and safe execution
 
@@ -41,7 +41,7 @@ Phase gate: remain in restricted operation until Phase C establishes durable ten
 
 Phase gate: do not enable real multi-user outreach until items 01–18 have evidence of completion, including deployment checks applicable to the selected hosting environment.
 
-**Storage checkpoint:** item 14 is verified for the local single-owner topology: versioned tenant-owned records, preserved encrypted OAuth data, restart restoration, connection revocation/generations and integrity-checked backup/restore. The local suite passes 94 tests. Runtime multi-user isolation (15) and durable execution/cancellation/idempotency (16) remain pending; live actions stay disabled. See `P1-STORAGE.md`. This feature branch must pass hosted PR checks before merge.
+**Storage checkpoint:** item 14 is verified for the local single-owner topology: versioned tenant-owned records, preserved encrypted OAuth data, restart restoration, connection revocation/generations and integrity-checked backup/restore. The local suite passes 94 tests. Runtime multi-user isolation (15) and durable execution/cancellation/idempotency (16) remain pending; live actions stay disabled. See `P1-STORAGE.md`. PR #20 was merged; all post-merge checks passed, and the 4 November recovery run passed all six jobs again.
 
 ## Phase D — P1: repair the end-to-end integrations
 
@@ -70,6 +70,7 @@ Append one row when an item is finished. Leave its checkbox unchecked if its acc
 
 | Item | Change/commit | Verification evidence | Deployment status | Remaining limitation |
 | --- | --- | --- | --- | --- |
+| 13 | Hosted deliberate failure and normal recovery; protection reverified | Runs `41778811893` (expected failure) and `41779206213` (all six jobs pass) | GitHub merge gate active | Runtime isolation remains item 15 |
 | 01 | Single-owner/action controls and actual IAM containment | Demo/provider regressions; all four cloud URLs deny anonymous requests with 403 | Old revisions contained; ingress change deferred | Billing disabled; no new revision deployed |
 | 02 | Explicit mode propagation and confirmed-booking notifications | Direct call/email/Calendar denials; unconfirmed meetings cannot notify success | Verified locally | Live provider writes intentionally disabled |
 | 03 | `e4486eb` committed by owner | Production build + TypeScript pass; zero high/critical npm findings | Not deployed | 16 moderate lint-toolchain findings; item 12 |

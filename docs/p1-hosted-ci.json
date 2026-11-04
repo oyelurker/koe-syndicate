@@ -1,10 +1,18 @@
 {
-  "commit": "844bce68daff9ae28bd582fc78ab55d46fd3a911",
-  "run_url": "https://github.com/oyelurker/koe-syndicate/actions/runs/41275060918",
+  "commit": "77879b37fc462d19a5a7a86e4e91d5d9d52bc2a9",
+  "run_url": "https://github.com/oyelurker/koe-syndicate/actions/runs/41779206213",
   "run_conclusion": "success",
   "jobs": [
     {
+      "name": "backend (windows-latest)",
+      "conclusion": "success"
+    },
+    {
       "name": "dependency-audit",
+      "conclusion": "success"
+    },
+    {
+      "name": "backend (ubuntu-latest)",
       "conclusion": "success"
     },
     {
@@ -13,14 +21,6 @@
     },
     {
       "name": "secrets",
-      "conclusion": "success"
-    },
-    {
-      "name": "backend (windows-latest)",
-      "conclusion": "success"
-    },
-    {
-      "name": "backend (ubuntu-latest)",
       "conclusion": "success"
     },
     {
@@ -37,5 +37,53 @@
     "required_approvals": 0,
     "force_pushes_allowed": false,
     "deletions_allowed": false
+  },
+  "verified_on": "2026-11-04",
+  "failure_gate_proof": {
+    "run_url": "https://github.com/oyelurker/koe-syndicate/actions/runs/41778811893",
+    "commit": "77879b37fc462d19a5a7a86e4e91d5d9d52bc2a9",
+    "run_conclusion": "failure",
+    "manual_input": {
+      "exercise_failure_gate": true
+    },
+    "jobs": [
+      {
+        "name": "secrets",
+        "conclusion": "success",
+        "failed_steps": []
+      },
+      {
+        "name": "frontend",
+        "conclusion": "success",
+        "failed_steps": []
+      },
+      {
+        "name": "dependency-audit",
+        "conclusion": "success",
+        "failed_steps": []
+      },
+      {
+        "name": "backend (ubuntu-latest)",
+        "conclusion": "failure",
+        "failed_steps": [
+          "Exercise intentional test failure (manual verification only)"
+        ]
+      },
+      {
+        "name": "backend (windows-latest)",
+        "conclusion": "success",
+        "failed_steps": []
+      },
+      {
+        "name": "required-checks",
+        "conclusion": "failure",
+        "failed_steps": [
+          "Require every verification job to succeed"
+        ]
+      }
+    ],
+    "maintained_linux_tests": "success",
+    "merge_attempted": false,
+    "recovery_run_url": "https://github.com/oyelurker/koe-syndicate/actions/runs/41779206213"
   }
 }
